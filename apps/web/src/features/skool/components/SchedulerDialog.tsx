@@ -17,7 +17,7 @@ import {
   SelectValue,
   Switch,
 } from '@0ne/ui'
-import { Loader2, Layers } from 'lucide-react'
+import { Loader2, Layers, RefreshCw } from 'lucide-react'
 import { DAY_NAMES, type DayOfWeek } from '@0ne/db'
 import { useCategories } from '../hooks/use-categories'
 import { useVariationGroups } from '../hooks/use-variation-groups'
@@ -62,7 +62,7 @@ export function SchedulerDialog({
   isSaving = false,
 }: SchedulerDialogProps) {
   const [formData, setFormData] = useState<SchedulerFormData>(defaultFormData)
-  const { categories, isLoading: categoriesLoading } = useCategories()
+  const { categories, isLoading: categoriesLoading, isRefreshing, refresh: refreshCategories, source } = useCategories()
   const { groups: variationGroups, isLoading: groupsLoading } = useVariationGroups()
   const isEditMode = !!scheduler?.id
 
@@ -114,13 +114,25 @@ export function SchedulerDialog({
         <div className="grid gap-4 py-4">
           {/* Category */}
           <div className="grid gap-2">
-            <label htmlFor="scheduler-category" className="text-sm font-medium">
-              Skool Category (where to post)
-            </label>
+            <div className="flex items-center justify-between">
+              <label htmlFor="scheduler-category" className="text-sm font-medium">
+                Skool Category (where to post)
+              </label>
+              <button
+                type="button"
+                onClick={refreshCategories}
+                disabled={isRefreshing || categoriesLoading}
+                className="text-xs text-muted-foreground hover:text-foreground flex items-center gap-1 disabled:opacity-50"
+                title="Refresh categories from Skool"
+              >
+                <RefreshCw className={`h-3 w-3 ${isRefreshing ? 'animate-spin' : ''}`} />
+                {isRefreshing ? 'Refreshing...' : 'Refresh'}
+              </button>
+            </div>
             <Select
               value={formData.category}
               onValueChange={handleCategoryChange}
-              disabled={categoriesLoading}
+              disabled={categoriesLoading || isRefreshing}
             >
               <SelectTrigger id="scheduler-category">
                 <SelectValue placeholder={categoriesLoading ? 'Loading...' : 'Select category'} />
@@ -133,6 +145,11 @@ export function SchedulerDialog({
                 ))}
               </SelectContent>
             </Select>
+            {source === 'fallback' && (
+              <p className="text-xs text-amber-600">
+                Using fallback categories. Click Refresh to fetch from Skool.
+              </p>
+            )}
           </div>
 
           {/* Day of Week and Time */}

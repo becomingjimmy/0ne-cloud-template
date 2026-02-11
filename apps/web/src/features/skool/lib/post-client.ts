@@ -346,73 +346,86 @@ export async function createPost(params: CreatePostParams): Promise<CreatePostRe
 }
 
 /**
- * Get community categories/labels for a group
+ * Get community categories/labels for a group by scraping the group's community page
  *
- * These are used as the categoryId when creating posts.
+ * Skool embeds category data in the __NEXT_DATA__ script tag on the page.
+ * We scrape this to get the actual live categories.
  *
  * @param groupSlug - Group slug (e.g., 'fruitful')
  * @returns Array of categories with id and name
- *
- * TODO: Implement once endpoint is discovered
  */
 export async function getCategories(
   groupSlug: string
-): Promise<{ id: string; name: string }[] | { error: string }> {
-  console.log(`[PostClient] Getting categories for ${groupSlug}`)
+): Promise<{ id: string; name: string; position?: number }[] | { error: string }> {
+  console.log(`[PostClient] Getting categories for ${groupSlug} via page scrape`)
 
   try {
-    const groupId = await getGroupId(groupSlug)
-    if (!groupId) {
-      return { error: `Group not found: ${groupSlug}` }
+    const cookies = process.env.SKOOL_COOKIES || ''
+    if (!cookies) {
+      return { error: 'SKOOL_COOKIES environment variable is not set' }
     }
 
-    // Try different category endpoints
-    const endpoints = [
-      `${SKOOL_API.BASE_URL}/groups/${groupId}/categories`,
-      `${SKOOL_API.BASE_URL}/groups/${groupId}/labels`,
-      `${SKOOL_API.BASE_URL}/groups/${groupId}/community/categories`,
-    ]
+    // Fetch the community page which contains __NEXT_DATA__
+    const pageUrl = `https://www.skool.com/${groupSlug}/community`
+    console.log(`[PostClient] Fetching page: ${pageUrl}`)
 
-    for (const endpoint of endpoints) {
-      console.log(`[PostClient] Trying category endpoint: ${endpoint}`)
+    const response = await fetch(pageUrl, {
+      headers: {
+        cookie: cookies,
+        'user-agent':
+          'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+      },
+    })
 
-      try {
-        const response = await fetchWithAuth(endpoint)
+    if (!response.ok) {
+      return { error: `Failed to fetch page: HTTP ${response.status}` }
+    }
 
-        if (response.ok) {
-          const data = await response.json()
-          console.log(`[PostClient] Categories response:`, JSON.stringify(data, null, 2))
+    const html = await response.text()
 
-          // Try to extract categories from various response formats
-          const categories =
-            data.categories ||
-            data.labels ||
-            data.data ||
-            (Array.isArray(data) ? data : null)
+    // Extract __NEXT_DATA__ JSON from the script tag
+    const nextDataMatch = html.match(/<script id="__NEXT_DATA__" type="application\/json">([^<]+)<\/script>/)
+    if (!nextDataMatch) {
+      console.error('[PostClient] Could not find __NEXT_DATA__ in page')
+      return { error: 'Could not find __NEXT_DATA__ in page' }
+    }
 
-          if (categories && Array.isArray(categories)) {
-            return categories.map((c: { id: string; name?: string; title?: string }) => ({
-              id: c.id,
-              name: c.name || c.title || 'Unknown',
-            }))
-          }
-        }
+    const nextData = JSON.parse(nextDataMatch[1])
+    console.log(`[PostClient] Parsed __NEXT_DATA__, looking for labels/categories...`)
 
-        if (response.status === 404 || response.status === 405) {
-          continue
-        }
-      } catch {
-        continue
+    // Navigate to find labels in the page props
+    // Structure: props.pageProps.group.labels or similar
+    const pageProps = nextData?.props?.pageProps
+    if (!pageProps) {
+      return { error: 'Could not find pageProps in __NEXT_DATA__' }
+    }
+
+    // Try different paths where labels might be stored
+    const labels =
+      pageProps.group?.labels ||
+      pageProps.labels ||
+      pageProps.community?.labels ||
+      pageProps.initialData?.group?.labels
+
+    if (!labels || !Array.isArray(labels)) {
+      console.log(`[PostClient] pageProps keys:`, Object.keys(pageProps))
+      if (pageProps.group) {
+        console.log(`[PostClient] group keys:`, Object.keys(pageProps.group))
       }
+      return { error: 'Could not find labels array in page data' }
     }
 
-    // TODO: Categories might be in the Next.js page data
-    // Try fetching from /_next/data/{buildId}/{groupSlug}/about.json
-    return {
-      error:
-        'Could not find categories endpoint. Categories may need to be fetched from page data.',
-    }
+    console.log(`[PostClient] Found ${labels.length} categories:`, JSON.stringify(labels, null, 2))
+
+    // Map to our format
+    return labels.map((label: { id: string; name: string; position?: number }, index: number) => ({
+      id: label.id,
+      name: label.name,
+      position: label.position ?? index,
+    }))
   } catch (error) {
+    console.error('[PostClient] Error fetching categories:', error)
     return {
       error: error instanceof Error ? error.message : 'Unknown error fetching categories',
     }

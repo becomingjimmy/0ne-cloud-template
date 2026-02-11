@@ -17,7 +17,7 @@ import {
   SelectValue,
   Switch,
 } from '@0ne/ui'
-import { Loader2, Image as ImageIcon, Video, Mail, AlertCircle, FolderOpen } from 'lucide-react'
+import { Loader2, Image as ImageIcon, Video, Mail, AlertCircle, FolderOpen, RefreshCw } from 'lucide-react'
 import { useCategories } from '../hooks/use-categories'
 import { useCampaigns } from '../hooks/use-campaigns'
 import { useGroupSettings } from '../hooks/use-group-settings'
@@ -76,7 +76,7 @@ export function OneOffPostDialog({
   const [formData, setFormData] = useState<OneOffPostFormData>(defaultFormData)
   const [imagePickerOpen, setImagePickerOpen] = useState(false)
   const [videoPickerOpen, setVideoPickerOpen] = useState(false)
-  const { categories, isLoading: categoriesLoading } = useCategories()
+  const { categories, isLoading: categoriesLoading, isRefreshing, refresh: refreshCategories, source } = useCategories()
   const { campaigns } = useCampaigns({ activeOnly: true })
   const { emailBlastStatus } = useGroupSettings(formData.group_slug)
   const isEditMode = !!post?.id
@@ -152,13 +152,24 @@ export function OneOffPostDialog({
           {/* Category and Campaign */}
           <div className="grid grid-cols-2 gap-4">
             <div className="grid gap-2">
-              <label htmlFor="oneoff-category" className="text-sm font-medium">
-                Skool Category
-              </label>
+              <div className="flex items-center justify-between">
+                <label htmlFor="oneoff-category" className="text-sm font-medium">
+                  Skool Category
+                </label>
+                <button
+                  type="button"
+                  onClick={refreshCategories}
+                  disabled={isRefreshing || categoriesLoading}
+                  className="text-xs text-muted-foreground hover:text-foreground flex items-center gap-1 disabled:opacity-50"
+                  title="Refresh categories from Skool"
+                >
+                  <RefreshCw className={`h-3 w-3 ${isRefreshing ? 'animate-spin' : ''}`} />
+                </button>
+              </div>
               <Select
                 value={formData.category}
                 onValueChange={handleCategoryChange}
-                disabled={categoriesLoading}
+                disabled={categoriesLoading || isRefreshing}
               >
                 <SelectTrigger id="oneoff-category">
                   <SelectValue placeholder={categoriesLoading ? 'Loading...' : 'Select category'} />
@@ -171,6 +182,9 @@ export function OneOffPostDialog({
                   ))}
                 </SelectContent>
               </Select>
+              {source === 'fallback' && (
+                <p className="text-xs text-amber-600">Using fallback. Click refresh.</p>
+              )}
             </div>
             <div className="grid gap-2">
               <label htmlFor="oneoff-campaign" className="text-sm font-medium">
