@@ -56,8 +56,8 @@ const DAY_OPTIONS = [
 ]
 
 // Status options for editable one-off posts
-const EDITABLE_ONEOFF_STATUSES: OneOffPostStatus[] = ['draft', 'approved', 'pending']
-const READONLY_ONEOFF_STATUSES: OneOffPostStatus[] = ['published', 'posted_manually', 'failed', 'cancelled']
+const EDITABLE_ONEOFF_STATUSES: OneOffPostStatus[] = ['draft', 'approved', 'pending', 'posted_manually']
+const READONLY_ONEOFF_STATUSES: OneOffPostStatus[] = ['published', 'failed', 'cancelled']
 
 // Display labels for one-off post statuses
 const STATUS_LABELS: Record<OneOffPostStatus, string> = {
