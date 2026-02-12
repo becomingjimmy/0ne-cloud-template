@@ -5,6 +5,61 @@ import type { SkoolOneOffPostInput } from '@0ne/db'
 export const dynamic = 'force-dynamic'
 
 /**
+ * Convert a local datetime string to UTC ISO string
+ * Assumes input is in America/New_York timezone
+ *
+ * @param localDatetime - e.g., "2026-02-12T12:00:00" (interpreted as ET)
+ * @param timezone - timezone to interpret the input as (default: America/New_York)
+ * @returns UTC ISO string
+ */
+function convertToUTC(localDatetime: string, timezone: string = 'America/New_York'): string {
+  // If already has timezone offset (ends with Z or +/-HH:MM), return as-is
+  if (/[Z+\-]\d{2}:\d{2}$/.test(localDatetime) || localDatetime.endsWith('Z')) {
+    return new Date(localDatetime).toISOString()
+  }
+
+  // Parse the local datetime components
+  const [datePart, timePart] = localDatetime.split('T')
+  const [year, month, day] = datePart.split('-').map(Number)
+  const [hour, minute, second = 0] = (timePart || '00:00:00').split(':').map(Number)
+
+  // Create a date in the target timezone using Intl.DateTimeFormat
+  // We need to find the UTC time that corresponds to this local time
+  const formatter = new Intl.DateTimeFormat('en-US', {
+    timeZone: timezone,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: false,
+  })
+
+  // Start with a guess (the naive interpretation as UTC)
+  let testDate = new Date(Date.UTC(year, month - 1, day, hour, minute, second))
+
+  // Get what this UTC time would be in the target timezone
+  const parts = formatter.formatToParts(testDate)
+  const localHour = parseInt(parts.find(p => p.type === 'hour')?.value || '0')
+  const localDay = parseInt(parts.find(p => p.type === 'day')?.value || '0')
+
+  // Calculate the offset and adjust
+  // This is a simplified approach that handles most cases
+  let hourDiff = hour - localHour
+  let dayDiff = day - localDay
+
+  // Handle day boundary crossings
+  if (dayDiff > 0) hourDiff += 24
+  if (dayDiff < 0) hourDiff -= 24
+
+  // Adjust the date by the difference
+  testDate = new Date(testDate.getTime() + hourDiff * 60 * 60 * 1000)
+
+  return testDate.toISOString()
+}
+
+/**
  * GET /api/skool/oneoff-posts
  * List one-off posts with optional filters
  *
@@ -75,8 +130,12 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    // Validate scheduled_at is a valid date
-    const scheduledDate = new Date(body.scheduled_at)
+    // Convert scheduled_at from local timezone to UTC
+    const timezone = body.timezone || 'America/New_York'
+    const scheduledAtUTC = convertToUTC(body.scheduled_at, timezone)
+
+    // Validate the converted date
+    const scheduledDate = new Date(scheduledAtUTC)
     if (isNaN(scheduledDate.getTime())) {
       return NextResponse.json({ error: 'Invalid scheduled_at date format' }, { status: 400 })
     }
@@ -87,7 +146,7 @@ export async function POST(request: NextRequest) {
         group_slug: body.group_slug || 'fruitful',
         category: body.category,
         category_id: body.category_id || null,
-        scheduled_at: body.scheduled_at,
+        scheduled_at: scheduledAtUTC,
         timezone: body.timezone || 'America/New_York',
         title: body.title,
         body: body.body,
@@ -129,8 +188,11 @@ export async function PUT(request: NextRequest) {
       return NextResponse.json({ error: 'Missing id' }, { status: 400 })
     }
 
-    // Validate scheduled_at if provided
+    // Convert scheduled_at from local timezone to UTC if provided
     if (updates.scheduled_at) {
+      const timezone = updates.timezone || 'America/New_York'
+      updates.scheduled_at = convertToUTC(updates.scheduled_at, timezone)
+
       const scheduledDate = new Date(updates.scheduled_at)
       if (isNaN(scheduledDate.getTime())) {
         return NextResponse.json({ error: 'Invalid scheduled_at date format' }, { status: 400 })
