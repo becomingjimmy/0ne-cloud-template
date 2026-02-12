@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useCallback, useRef, useEffect } from 'react'
+import { useState, useCallback, useRef, useEffect, Suspense } from 'react'
 import { useSearchParams, useRouter } from 'next/navigation'
 import {
   Button,
@@ -83,7 +83,34 @@ type OneOffInlineChanges = {
   status?: OneOffPostStatus
 }
 
+// Main page component with Suspense boundary for useSearchParams
 export default function SchedulerPage() {
+  return (
+    <Suspense fallback={<SchedulerPageLoading />}>
+      <SchedulerPageContent />
+    </Suspense>
+  )
+}
+
+// Loading fallback
+function SchedulerPageLoading() {
+  return (
+    <div className="p-6 space-y-6">
+      <div>
+        <h1 className="text-2xl font-bold">Scheduler</h1>
+        <p className="text-muted-foreground">
+          Manage recurring and one-off scheduled posts
+        </p>
+      </div>
+      <div className="flex items-center justify-center py-12">
+        <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+      </div>
+    </div>
+  )
+}
+
+// Content component that uses useSearchParams
+function SchedulerPageContent() {
   const searchParams = useSearchParams()
   const router = useRouter()
 

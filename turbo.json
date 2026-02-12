@@ -3,7 +3,21 @@
   "tasks": {
     "build": {
       "dependsOn": ["^build"],
-      "outputs": [".next/**", "dist/**"]
+      "outputs": [".next/**", "dist/**"],
+      "env": [
+        "CLERK_SECRET_KEY",
+        "SUPABASE_SERVICE_ROLE_KEY",
+        "CRON_SECRET",
+        "GHL_API_KEY",
+        "GHL_LOCATION_ID",
+        "META_ACCESS_TOKEN",
+        "META_AD_ACCOUNT_ID",
+        "DATABASE_URL",
+        "SKOOL_EMAIL",
+        "SKOOL_PASSWORD",
+        "SKOOL_COOKIES",
+        "EXTERNAL_API_KEY"
+      ]
     },
     "dev": {
       "cache": false,
