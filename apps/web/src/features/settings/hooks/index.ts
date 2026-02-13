@@ -14,3 +14,12 @@ export {
   useSchedules,
   type UseSchedulesReturn,
 } from './use-schedules'
+
+export {
+  useSyncHealth,
+  formatLastSync,
+  getStatusLabel,
+  type SyncHealthStatus,
+  type UseSyncHealthOptions,
+  type UseSyncHealthReturn,
+} from './use-sync-health'

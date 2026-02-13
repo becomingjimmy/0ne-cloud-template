@@ -18,6 +18,7 @@ import {
 import { useState, useMemo } from 'react'
 import { useSidebar } from './SidebarContext'
 import { ThemeToggle } from './ThemeToggle'
+import { SyncStatusIndicator } from './SyncStatusIndicator'
 import type { AppId, UserPermissions } from '@0ne/auth/permissions'
 import { getAppNavigation } from '@/lib/apps'
 
@@ -283,6 +284,11 @@ export function Sidebar({ navigation }: SidebarProps) {
           </p>
           <div className="space-y-1">
             {accountNavigation.map(item => renderNavItem(item, false))}
+          </div>
+
+          {/* Sync Status Indicator */}
+          <div className="mt-2">
+            <SyncStatusIndicator />
           </div>
 
           {/* Theme Toggle */}
