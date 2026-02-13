@@ -36,6 +36,7 @@ import {
   updateScheduler,
   deleteScheduler,
   useOneOffPosts,
+  createOneOffPost,
   updateOneOffPost,
   deleteOneOffPost,
   useVariationGroups,
@@ -409,7 +410,7 @@ function SchedulerPageContent() {
       const scheduledAt = `${data.scheduled_date}T${data.scheduled_time}:00`
 
       if (data.id) {
-        await updateOneOffPost(data.id, {
+        const result = await updateOneOffPost(data.id, {
           group_slug: data.group_slug,
           category: data.category,
           category_id: data.category_id,
@@ -423,7 +424,31 @@ function SchedulerPageContent() {
           send_email_blast: data.send_email_blast,
           status: data.status,
         })
+        if (result.error) {
+          toast.error(result.error)
+          return
+        }
         toast.success('Scheduled post updated')
+      } else {
+        const result = await createOneOffPost({
+          group_slug: data.group_slug,
+          category: data.category,
+          category_id: data.category_id,
+          scheduled_at: scheduledAt,
+          timezone: data.timezone,
+          title: data.title,
+          body: data.body,
+          image_url: data.image_url || null,
+          video_url: data.video_url || null,
+          campaign_id: data.campaign_id,
+          send_email_blast: data.send_email_blast,
+          status: data.status,
+        })
+        if (result.error) {
+          toast.error(result.error)
+          return
+        }
+        toast.success('Post scheduled')
       }
       setOneOffDialogOpen(false)
       refreshOneOff()

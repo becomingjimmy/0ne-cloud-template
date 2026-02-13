@@ -4,19 +4,67 @@ overview: Refactor KPI Dashboard data flow to make filter changes feel instant a
 todos:
   - id: agg-model
     content: Define/extend aggregate tables for all filter dims
-    status: pending
+    status: completed
   - id: dataset-endpoint
     content: Build unified /api/kpi/dataset + payload schema
-    status: pending
+    status: completed
   - id: client-store
     content: Add KPI dataset store + memoized selectors
-    status: pending
+    status: completed
   - id: migrate-pages
     content: Switch all KPI pages to store-derived data
-    status: pending
+    status: in_progress
   - id: perf-validate
     content: Measure latency, compare correctness vs old APIs
     status: pending
+
+## Implementation Progress (2026-02-12)
+
+### Completed
+
+1. **Migration SQL** (`packages/db/migrations/2026-02-12-instant-filtering.sql`)
+   - Created dimension tables: `dimension_sources`, `dimension_campaigns`, `dimension_stages`, `dimension_expense_categories`
+   - Created `daily_expenses_by_category` for pre-aggregated expense data
+   - Created `weekly_trends` for pre-computed sparkline data
+   - Added indexes for fast filtered queries
+   - Seeded dimension tables from existing data
+
+2. **Enhanced Cron** (`apps/web/src/app/api/cron/aggregate/route.ts`)
+   - Now generates source-level aggregates (date, null, source)
+   - Generates campaign + source combination aggregates
+   - Updates dimension tables on each run
+   - Computes weekly trends on Sundays
+   - Aggregates expenses by category
+
+3. **Dataset Endpoint** (`apps/web/src/app/api/kpi/dataset/route.ts`)
+   - Single endpoint returning all pre-aggregated data
+   - Organized by dimension: daily, bySource, byCampaign
+   - Includes dimension tables for filter UI population
+   - Returns funnel, trends, expenses, and Skool data
+
+4. **Type Definitions** (`apps/web/src/features/kpi/lib/dataset-types.ts`)
+   - Full TypeScript types for dataset response
+   - Filter types for client-side state
+   - Derived metrics types for computed values
+
+5. **Zustand Store** (`apps/web/src/features/kpi/store/kpi-dataset-store.ts`)
+   - Centralized dataset storage with memoized selectors
+   - Filter state management
+   - Derived metrics calculation (current vs previous period)
+   - Sparkline generation
+   - Added zustand to package.json dependencies
+
+6. **Provider Component** (`apps/web/src/features/kpi/providers/KPIDatasetProvider.tsx`)
+   - Auto-fetches dataset on mount with staleness check
+   - Convenience hook for dataset access
+
+### Pending
+
+1. **Run Migration** - Execute `packages/db/migrations/2026-02-12-instant-filtering.sql` in Supabase
+2. **Install Zustand** - Run `bun install` to add zustand dependency
+3. **Backfill Data** - Run cron with `?date=YYYY-MM-DD` for historical dates
+4. **Migrate Pages** - Incrementally switch pages to use the store (large task)
+5. **Performance Validation** - Compare response times and verify data accuracy
 isProject: false
 ---
 
