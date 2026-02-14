@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { auth } from '@clerk/nextjs/server'
 
 export const dynamic = 'force-dynamic'
 
@@ -6,7 +7,7 @@ export const dynamic = 'force-dynamic'
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-  'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+  'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-Clerk-User-Id',
 }
 
 /**
@@ -18,34 +19,60 @@ export async function OPTIONS() {
 }
 
 /**
- * GET /api/extension/health
- * Health check endpoint for the Chrome extension
- * Validates API key to give accurate connection feedback
+ * Validate extension authentication
+ * Supports both Clerk session and API key authentication
  */
-export async function GET(request: NextRequest) {
-  // Validate API key
+async function validateAuth(
+  request: NextRequest
+): Promise<{ valid: boolean; authType: 'clerk' | 'apiKey' | null; userId?: string; error?: string }> {
   const authHeader = request.headers.get('authorization')
-  const expectedKey = process.env.EXTENSION_API_KEY
-
-  if (!expectedKey) {
-    console.error('[Extension Health] EXTENSION_API_KEY not set')
-    return NextResponse.json(
-      { error: 'Server configuration error' },
-      { status: 500, headers: corsHeaders }
-    )
-  }
 
   if (!authHeader) {
-    return NextResponse.json(
-      { error: 'Missing Authorization header' },
-      { status: 401, headers: corsHeaders }
-    )
+    return { valid: false, authType: null, error: 'Missing Authorization header' }
   }
 
-  const match = authHeader.match(/^Bearer\s+(.+)$/i)
-  if (!match || match[1] !== expectedKey) {
+  // Check for Clerk auth first (Clerk <token>)
+  if (authHeader.startsWith('Clerk ')) {
+    try {
+      const { userId } = await auth()
+      if (userId) {
+        return { valid: true, authType: 'clerk', userId }
+      }
+      return { valid: false, authType: 'clerk', error: 'Invalid or expired Clerk session' }
+    } catch {
+      return { valid: false, authType: 'clerk', error: 'Failed to validate Clerk session' }
+    }
+  }
+
+  // Check for Bearer token (API key)
+  const bearerMatch = authHeader.match(/^Bearer\s+(.+)$/i)
+  if (bearerMatch) {
+    const expectedKey = process.env.EXTENSION_API_KEY
+    if (!expectedKey) {
+      console.error('[Extension Health] EXTENSION_API_KEY not set')
+      return { valid: false, authType: 'apiKey', error: 'Server configuration error' }
+    }
+
+    if (bearerMatch[1] === expectedKey) {
+      return { valid: true, authType: 'apiKey' }
+    }
+    return { valid: false, authType: 'apiKey', error: 'Invalid API key' }
+  }
+
+  return { valid: false, authType: null, error: 'Invalid Authorization header format' }
+}
+
+/**
+ * GET /api/extension/health
+ * Health check endpoint for the Chrome extension
+ * Supports both Clerk session and API key authentication
+ */
+export async function GET(request: NextRequest) {
+  const authResult = await validateAuth(request)
+
+  if (!authResult.valid) {
     return NextResponse.json(
-      { error: 'Invalid API key' },
+      { error: authResult.error },
       { status: 401, headers: corsHeaders }
     )
   }
@@ -55,6 +82,7 @@ export async function GET(request: NextRequest) {
       status: 'ok',
       timestamp: new Date().toISOString(),
       service: 'skool-extension-api',
+      authType: authResult.authType,
     },
     { headers: corsHeaders }
   )
