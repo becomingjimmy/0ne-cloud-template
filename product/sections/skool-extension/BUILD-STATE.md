@@ -1,7 +1,7 @@
 # Skool Chrome Extension - Build State
 
-> **Purpose:** Chrome extension that handles ALL Skool communication (API interception, WebSocket tap, message sending) and pushes data to 0ne-app for database storage and GHL sync.
-> **Status:** Phase 2 - API Interception (Pivoted from DOM)
+> **Purpose:** Chrome extension that handles ALL Skool communication (API interception, WebSocket tap, message sending, KPI sync, analytics, scheduling) and pushes data to 0ne-app for database storage and GHL sync.
+> **Status:** Phase 2C Complete - Moving to Extension-Only Architecture
 
 ---
 
@@ -13,6 +13,36 @@
 **Blocker:** None
 
 **Key Discovery:** Skool uses API-driven architecture. Fetch interception captures structured data directly from `api2.skool.com/channels/{id}/messages` - no DOM parsing needed.
+
+---
+
+## CRITICAL: AWS WAF Blocks Server-Side Requests (2026-02-14)
+
+**Discovery:** Skool uses AWS WAF bot protection that blocks ALL non-browser requests.
+
+```bash
+# Server-side request result:
+HTTP 405 with x-amzn-waf-action: challenge
+
+# This means:
+- AWS WAF requires JavaScript browser challenge
+- Valid JWT tokens are NOT enough
+- ANY server-side Skool API calls will fail
+- Affects: KPI sync, member sync, analytics, scheduling
+```
+
+**Impact:**
+| Feature | Old Approach | New Approach |
+|---------|--------------|--------------|
+| DM Sync | Server-side API → blocked | Extension intercepts |
+| KPI Sync | Server-side API → blocked | Extension fetches → pushes |
+| Member Sync | Server-side API → blocked | Extension fetches → pushes |
+| Analytics | Server-side API → blocked | Extension fetches → pushes |
+| Post Scheduler | Server-side API → blocked | Extension posts → confirms |
+
+**Conclusion:** The Chrome extension is the ONLY viable path for Skool integration. ALL Skool features must be moved to extension-based architecture.
+
+---
 
 **Verified Working (2026-02-14 00:43):**
 - ✅ Intercepting `api2.skool.com/self/chat-channels` → 30 conversations captured
@@ -349,6 +379,141 @@ window.WebSocket = function(url, protocols) {
 
 ---
 
+## Extension v2: Full Skool Integration (WAF Workaround)
+
+> **Context:** Server-side Skool API calls are blocked by AWS WAF. These phases move ALL Skool interactions to the Chrome extension.
+
+### Phase 8: Member/KPI Sync via Extension
+**Goal:** Replace server-side KPI/member sync with extension-based sync
+
+| Task | Status | Description |
+|------|--------|-------------|
+| 8.1 | ⬜ | Intercept `api2.skool.com/groups/{id}/members` API responses |
+| 8.2 | ⬜ | Parse member data: id, name, email, joined date, level, points |
+| 8.3 | ⬜ | Create `/api/extension/push-members` endpoint in 0ne-app |
+| 8.4 | ⬜ | Store members in `skool_members` table (upsert on skool_user_id) |
+| 8.5 | ⬜ | Intercept `api2.skool.com/groups/{id}/stats` for KPIs |
+| 8.6 | ⬜ | Create `/api/extension/push-kpis` endpoint |
+| 8.7 | ⬜ | Store KPIs in `skool_kpis` table with timestamp |
+| 8.8 | ⬜ | Update popup UI: Show member count, last KPI sync |
+| 8.9 | ⬜ | Trigger sync on Skool admin page visit |
+
+**API Endpoints to Intercept:**
+```
+GET api2.skool.com/groups/{group_id}/members?page=1&limit=50
+GET api2.skool.com/groups/{group_id}/stats
+GET api2.skool.com/groups/{group_id}/leaderboard
+```
+
+**Database Schema:**
+```sql
+-- skool_members table (new or update existing)
+CREATE TABLE skool_members (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id TEXT NOT NULL,  -- 0ne-app user who synced this
+  group_id TEXT NOT NULL,
+  skool_user_id TEXT NOT NULL,
+  name TEXT,
+  email TEXT,
+  avatar_url TEXT,
+  level INTEGER,
+  points INTEGER,
+  joined_at TIMESTAMPTZ,
+  last_seen_at TIMESTAMPTZ,
+  synced_at TIMESTAMPTZ DEFAULT NOW(),
+  UNIQUE(group_id, skool_user_id)
+);
+
+-- skool_kpis table
+CREATE TABLE skool_kpis (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id TEXT NOT NULL,
+  group_id TEXT NOT NULL,
+  metric_name TEXT NOT NULL,  -- 'members', 'engagement', 'posts', etc.
+  metric_value NUMERIC,
+  recorded_at TIMESTAMPTZ DEFAULT NOW()
+);
+```
+
+### Phase 9: Analytics Sync via Extension
+**Goal:** Capture Skool analytics/engagement data via extension
+
+| Task | Status | Description |
+|------|--------|-------------|
+| 9.1 | ⬜ | Intercept analytics API calls on Skool admin dashboard |
+| 9.2 | ⬜ | Parse engagement metrics: views, comments, likes, shares |
+| 9.3 | ⬜ | Create `/api/extension/push-analytics` endpoint |
+| 9.4 | ⬜ | Store in `skool_analytics` table with date dimension |
+| 9.5 | ⬜ | Capture post-level analytics when viewing individual posts |
+| 9.6 | ⬜ | Update popup UI: Show last analytics sync |
+
+**API Endpoints to Intercept:**
+```
+GET api2.skool.com/groups/{group_id}/analytics
+GET api2.skool.com/groups/{group_id}/posts/{post_id}/stats
+GET api2.skool.com/groups/{group_id}/engagement
+```
+
+### Phase 10: Post Scheduler via Extension
+**Goal:** Post scheduled content to Skool through the extension
+
+| Task | Status | Description |
+|------|--------|-------------|
+| 10.1 | ⬜ | Create `/api/extension/get-scheduled-posts` endpoint |
+| 10.2 | ⬜ | Extension polls for posts due in next 5 minutes |
+| 10.3 | ⬜ | Navigate to correct Skool group/category |
+| 10.4 | ⬜ | DOM automation: Fill post form (title, body, attachments) |
+| 10.5 | ⬜ | Trigger publish, wait for success |
+| 10.6 | ⬜ | Create `/api/extension/confirm-posted` endpoint |
+| 10.7 | ⬜ | Update `scheduled_posts` table with posted status + Skool post ID |
+| 10.8 | ⬜ | Handle errors: Network, validation, rate limiting |
+| 10.9 | ⬜ | Update popup UI: Show scheduled queue, next post time |
+
+**Post Scheduling Flow:**
+```
+┌──────────────┐     ┌──────────────┐     ┌──────────────┐
+│  0ne-app     │     │  Extension   │     │   Skool      │
+│  Scheduler   │────▶│  Polls API   │────▶│  DOM Post    │
+│  Dashboard   │     │  Every 30s   │     │  Automation  │
+└──────────────┘     └──────────────┘     └──────────────┘
+       │                    │                    │
+       │                    │                    │
+       ▼                    ▼                    ▼
+┌──────────────┐     ┌──────────────┐     ┌──────────────┐
+│  Create      │     │  Fetch due   │     │  Capture     │
+│  scheduled   │     │  posts       │     │  post ID     │
+│  post        │     │  Post to     │     │  Confirm     │
+│              │     │  Skool       │     │  success     │
+└──────────────┘     └──────────────┘     └──────────────┘
+```
+
+**DOM Automation (content script):**
+```typescript
+// Navigate to post creation
+await navigateToGroup(groupId);
+await clickNewPost();
+
+// Fill form
+await setPostCategory(category);
+await setPostTitle(title);
+await setPostBody(body);  // Rich text editor
+
+// Attach media if needed
+if (attachments.length > 0) {
+  await uploadAttachments(attachments);
+}
+
+// Publish
+await clickPublish();
+await waitForSuccess();
+
+// Extract post ID from URL or response
+const postId = extractPostId();
+return postId;
+```
+
+---
+
 ## Critical File Paths
 
 ### Extension
@@ -508,6 +673,7 @@ COMMIT: "Phase {X.Y}: {Description}"
 - ✅ Data flows to service worker
 - ✅ Service worker pushes to 0ne-app API with buffering, dedup, retry
 - ✅ Popup shows sync stats (totalPushed, lastSyncTime, connection status)
+- ✅ Extension messages sync to GHL via cron job
 
 **Next Tasks:**
 1. Intercept `new WebSocket()` constructor in `main-world.ts`
@@ -516,3 +682,78 @@ COMMIT: "Phase {X.Y}: {Description}"
 4. Forward real-time messages to service worker
 
 **Goal:** Capture messages instantly as they arrive via WebSocket, not just on page load/refresh.
+
+---
+
+## Phase Roadmap
+
+| Phase | Status | Description |
+|-------|--------|-------------|
+| 1 | ✅ | Extension Foundation |
+| 2 | ✅ | API Interception (Pivot from DOM) |
+| 2B | ⬜ | Full History Capture (Optional) |
+| 2C | ✅ | Push to 0ne-app |
+| 3 | ⬅️ | WebSocket Interception (Real-time) |
+| 4 | ⬜ | Outbound Message Sending |
+| 5 | ⬜ | Multi-Staff Support |
+| 6 | ⬜ | Cookie Management |
+| 7 | ⬜ | Clerk Auth Integration |
+| **8** | ⬜ | **Member/KPI Sync via Extension** |
+| **9** | ⬜ | **Analytics Sync via Extension** |
+| **10** | ⬜ | **Post Scheduler via Extension** |
+
+---
+
+## Agent Deployment Protocol
+
+### CRITICAL: One Phase = One Agent
+
+```
+⚠️ DO NOT implement multiple phases in one session
+⚠️ DO NOT skip the Task agent workflow
+⚠️ ALWAYS spawn a fresh Task agent for each phase
+```
+
+### Step-by-Step Deployment
+
+1. **Read this BUILD-STATE** in main session
+2. **Identify next phase** from Phase Roadmap table
+3. **Spawn Task agent** with phase-specific prompt (see template below)
+4. **Agent completes phase** → commits → returns result
+5. **Main session updates** BUILD-STATE checkboxes
+6. **Repeat** for next phase
+
+### Agent Prompt Template
+
+```
+You are deploying Phase {X} of the Skool Chrome Extension.
+
+## Context
+- Extension location: 03 - BUILD/03-1 - Apps/Skool-Extension/
+- 0ne-app location: 03 - BUILD/03-1 - Apps/0ne-app/
+- BUILD-STATE: product/sections/skool-extension/BUILD-STATE.md
+
+## Your Phase Tasks
+{Copy tasks from Phase table in BUILD-STATE}
+
+## Success Criteria
+{Copy specific verification from phase}
+
+## On Completion
+1. Ensure extension builds: `cd "03 - BUILD/03-1 - Apps/Skool-Extension" && bun run build`
+2. If 0ne-app changes: `cd "03 - BUILD/03-1 - Apps/0ne-app/apps/web" && bun run build`
+3. Commit with message: "Phase {X}: {description}"
+4. Return summary of what was created/modified
+5. DO NOT PUSH (Jimmy will push)
+```
+
+### Parallel vs Sequential Phases
+
+**Can run in parallel:**
+- Phase 8 (Member/KPI) and Phase 9 (Analytics) - independent data flows
+- Multiple extension features if they don't share state
+
+**Must run sequentially:**
+- Phase 3 before Phase 4 (WebSocket before outbound sending)
+- Phase 5 before Phase 6 (Multi-staff before cookie management)
+- Any phase that depends on schema changes from previous phase
