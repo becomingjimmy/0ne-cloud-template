@@ -430,22 +430,39 @@ export class SkoolDmClient {
   }
 
   /**
-   * Get messages in a conversation
+   * Get messages in a conversation (single page)
    *
    * @param channelId - The conversation channel ID
-   * @param afterMessageId - Get messages after this message ID (for pagination)
-   * @returns Array of messages
+   * @param options - Pagination options
+   * @returns Array of messages (ordered by creation time ascending by default)
    */
   async getMessages(
     channelId: string,
-    afterMessageId = '1'
+    options?: {
+      after?: string    // Get messages after this ID (for forward pagination)
+      before?: string   // Get messages before this ID (for backward pagination)
+      limit?: number    // Max messages to fetch (default: 50)
+    }
   ): Promise<SkoolMessage[]> {
     console.log(
-      `[SkoolDmClient] Fetching messages for channel: ${channelId}`
+      `[SkoolDmClient] Fetching messages for channel: ${channelId}`,
+      options
     )
 
     const url = new URL(`${SKOOL_API_BASE}/channels/${channelId}/messages`)
-    url.searchParams.set('after', afterMessageId)
+
+    // Skool API requires either 'after' or 'before' to be set
+    // Default to 'after=1' which gets all messages from the beginning
+    if (options?.before) {
+      url.searchParams.set('before', options.before)
+    } else {
+      // Use after (default to '1' to get all messages from start)
+      url.searchParams.set('after', options?.after ?? '1')
+    }
+
+    if (options?.limit) {
+      url.searchParams.set('limit', String(options.limit))
+    }
 
     const response = await this.fetch<{ messages: SkoolApiMessage[] }>(
       url.toString()
@@ -461,6 +478,133 @@ export class SkoolDmClient {
     return (response.messages || []).map((message) =>
       this.transformMessage(message, currentUserId)
     )
+  }
+
+  /**
+   * Get ALL messages in a conversation (with pagination)
+   *
+   * Uses backward pagination with 'before' parameter to fetch from
+   * newest to oldest messages. This works better with Skool's API.
+   *
+   * @param channelId - The conversation channel ID
+   * @param options - Fetch options
+   * @returns Array of all messages (newest first)
+   */
+  async getAllMessages(
+    channelId: string,
+    options?: {
+      maxMessages?: number  // Stop after this many messages (default: 500)
+      sinceDate?: Date      // Only fetch messages newer than this date
+    }
+  ): Promise<SkoolMessage[]> {
+    const maxMessages = options?.maxMessages ?? 500
+    const sinceDate = options?.sinceDate
+    const allMessages: SkoolMessage[] = []
+    let beforeCursor: string | undefined = undefined // Start from most recent
+    let iteration = 0
+    const pageSize = 50
+    const maxIterations = Math.ceil(maxMessages / pageSize) + 5 // Safety limit
+
+    console.log(
+      `[SkoolDmClient] Fetching all messages for channel: ${channelId}, maxMessages: ${maxMessages}`
+    )
+
+    // First, get the most recent messages with after=1
+    // This gives us a starting point for backward pagination
+    let initialMessages: SkoolMessage[]
+    try {
+      initialMessages = await this.getMessages(channelId, {
+        after: '1',
+        limit: pageSize,
+      })
+    } catch (error) {
+      console.log(`[SkoolDmClient] Error fetching initial messages:`, error)
+      return allMessages
+    }
+
+    if (initialMessages.length === 0) {
+      console.log(`[SkoolDmClient] No messages found in conversation`)
+      return allMessages
+    }
+
+    // Add initial messages
+    for (const msg of initialMessages) {
+      if (sinceDate && msg.sentAt < sinceDate) continue
+      allMessages.push(msg)
+    }
+
+    console.log(`[SkoolDmClient] Initial fetch: ${initialMessages.length} messages`)
+
+    // If we got a full page or want more, try backward pagination
+    if (initialMessages.length >= pageSize || allMessages.length < maxMessages) {
+      // The oldest message from initial fetch is our cursor for backward pagination
+      beforeCursor = initialMessages[0].id
+
+      while (iteration < maxIterations && allMessages.length < maxMessages) {
+        iteration++
+
+        let messages: SkoolMessage[]
+        try {
+          messages = await this.getMessages(channelId, {
+            before: beforeCursor,
+            limit: pageSize,
+          })
+        } catch (error) {
+          // Handle end of conversation
+          if (error instanceof SkoolDmError && error.statusCode === 400) {
+            console.log(`[SkoolDmClient] Reached beginning of conversation (API returned 400)`)
+            break
+          }
+          throw error
+        }
+
+        if (messages.length === 0) {
+          console.log(`[SkoolDmClient] No more older messages found`)
+          break
+        }
+
+        // Add messages (prepend since they're older)
+        let addedCount = 0
+        for (const msg of messages) {
+          if (sinceDate && msg.sentAt < sinceDate) {
+            console.log(`[SkoolDmClient] Reached date limit, stopping`)
+            return allMessages.reverse() // Return in chronological order
+          }
+
+          // Prepend older messages
+          allMessages.unshift(msg)
+          addedCount++
+
+          if (allMessages.length >= maxMessages) {
+            console.log(`[SkoolDmClient] Reached max messages limit (${maxMessages})`)
+            return allMessages.reverse() // Return in chronological order
+          }
+        }
+
+        // If we got fewer than a full page, we've reached the beginning
+        if (messages.length < pageSize) {
+          console.log(`[SkoolDmClient] Got partial page (${messages.length}/${pageSize}), reached beginning`)
+          break
+        }
+
+        // Update cursor to oldest message
+        beforeCursor = messages[0].id
+
+        console.log(
+          `[SkoolDmClient] Iteration ${iteration}: fetched ${messages.length}, total: ${allMessages.length}, cursor: ${beforeCursor}`
+        )
+
+        // Rate limiting
+        await this.requestDelay()
+      }
+    }
+
+    console.log(
+      `[SkoolDmClient] Finished fetching all messages: ${allMessages.length} total`
+    )
+
+    // Return in chronological order (oldest first)
+    return allMessages.reverse()
   }
 
   /**
