@@ -23,7 +23,6 @@ import {
 } from '@/features/dm-sync/lib/ghl-conversation'
 import {
   resolveOutboundStaff,
-  formatOutboundMessage,
 } from '@/features/dm-sync/lib/staff-users'
 
 // Disable body parsing - we need raw body for signature verification
@@ -276,10 +275,10 @@ export async function POST(request: Request) {
     // Generate a unique message ID for Skool (will be updated when actually sent)
     const pendingSkoolMessageId = `pending:${Date.now()}:${Math.random().toString(36).substring(7)}`
 
-    // 8. Format message with staff prefix if we have a staff member
-    const finalMessageText = staff
-      ? formatOutboundMessage(staff.displayName, processedMessage)
-      : processedMessage
+    // 8. Use raw message for Skool (no prefix)
+    // The prefix is only used when syncing TO GHL, not when sending TO Skool
+    // Skool messages should look natural without any platform indicators
+    const finalMessageText = processedMessage
 
     // 9. Queue message for sending via Skool API
     // Insert into dm_messages with direction='outbound', status='pending'
