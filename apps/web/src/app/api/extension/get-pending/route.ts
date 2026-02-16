@@ -141,13 +141,16 @@ export async function GET(request: NextRequest) {
     const supabase = createServerClient()
 
     // Debug: First check how many pending outbound messages exist at all
-    const { count: totalPending } = await supabase
+    const { count: totalPending, data: samplePending } = await supabase
       .from('dm_messages')
-      .select('*', { count: 'exact', head: true })
+      .select('id, user_id, staff_skool_id, source', { count: 'exact' })
       .eq('direction', 'outbound')
       .eq('status', 'pending')
+      .limit(3)
 
     console.log(`[Extension API] Total pending outbound messages in DB: ${totalPending}`)
+    console.log(`[Extension API] Sample pending messages:`, JSON.stringify(samplePending))
+    console.log(`[Extension API] Looking for staffSkoolId: ${staffSkoolId}`)
 
     // Query for pending outbound messages
     // These are messages that:
