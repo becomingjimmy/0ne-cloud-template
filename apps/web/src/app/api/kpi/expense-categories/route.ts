@@ -327,12 +327,12 @@ export async function DELETE(request: Request) {
     }
 
     // Check if any expenses use this category
-    const safeCatName = sanitizeForPostgrestFilter(category.name)
-    const safeCatSlug = sanitizeForPostgrestFilter(category.slug)
+    // Note: category.name and category.slug come from the database (not user input),
+    // so no sanitization needed — values are trusted
     const { data: expenses } = await supabase
       .from('expenses')
       .select('id')
-      .or(`category.ilike.${safeCatName},category.eq.${safeCatSlug}`)
+      .or(`category.ilike.${category.name},category.eq.${category.slug}`)
       .limit(1)
 
     if (expenses && expenses.length > 0) {

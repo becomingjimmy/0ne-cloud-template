@@ -259,6 +259,7 @@ export async function POST(request: NextRequest) {
           // Queue in dm_messages with source='hand-raiser' for extension pickup
           const messageRow: Omit<DmMessageRow, 'id'> = {
             clerk_user_id: clerkUserId,
+            staff_skool_id: staffSkoolId,
             skool_conversation_id: `hr-pending-${commenter.skoolUserId}`, // Placeholder — extension will resolve actual conversation
             skool_message_id: `hr-${commenter.campaignId}-${commenter.skoolUserId}-${Date.now()}`,
             ghl_message_id: null,

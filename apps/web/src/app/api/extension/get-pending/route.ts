@@ -104,7 +104,7 @@ export async function GET(request: NextRequest) {
       .eq('status', 'pending')
       // Allow both manual (inbox) and ghl messages
       // GHL messages are filtered to last 24 hours to avoid sending old backfill data
-      .or(`source.eq.manual,and(source.eq.ghl,created_at.gte.${oneDayAgo})`)
+      .or(`source.eq.manual,source.eq.hand-raiser,and(source.eq.ghl,created_at.gte.${oneDayAgo})`)
       .order('created_at', { ascending: true })
       .limit(limit)
 

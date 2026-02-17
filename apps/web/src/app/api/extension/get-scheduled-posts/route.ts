@@ -59,20 +59,24 @@ export async function GET(request: NextRequest) {
     const supabase = createServerClient()
 
     // Calculate the time window
+    // Look back 10 minutes to catch "Post Now" posts (status=approved, scheduled_at=NOW)
+    // that were queued between poll cycles
     const now = new Date()
+    const lookbackTime = new Date(now.getTime() - 10 * 60 * 1000)
     const futureTime = new Date(now.getTime() + minutes * 60 * 1000)
 
     console.log(
-      `[Extension API] Fetching scheduled posts: now=${now.toISOString()}, future=${futureTime.toISOString()}`
+      `[Extension API] Fetching scheduled posts: lookback=${lookbackTime.toISOString()}, now=${now.toISOString()}, future=${futureTime.toISOString()}`
     )
 
     // Query for one-off posts that are due
+    // Accept both 'pending' (normal scheduled) and 'approved' (Post Now) statuses
     const { data: oneoffPosts, error: oneoffError } = await supabase
       .from('skool_oneoff_posts')
       .select('*')
-      .eq('status', 'pending')
+      .in('status', ['pending', 'approved'])
       .lte('scheduled_at', futureTime.toISOString())
-      .gte('scheduled_at', now.toISOString())
+      .gte('scheduled_at', lookbackTime.toISOString())
       .order('scheduled_at', { ascending: true })
 
     if (oneoffError) {
