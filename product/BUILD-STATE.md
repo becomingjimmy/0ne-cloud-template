@@ -7,16 +7,16 @@
 
 ## Quick Resume
 
-**Last Updated:** 2026-02-16
-**Current Focus:** Skool API Migration — moving ALL remaining server-side Skool calls to extension
+**Last Updated:** 2026-02-17
+**Current Focus:** ID Column Migration complete — next up: Hand-Raiser UI
 
-**Session 2026-02-16 Summary:**
-- ✅ Fixed GHL → Skool outbound messaging (webhook wasn't working)
-- ✅ Fixed signature verification (GHL CP webhooks don't use signatures)
-- ✅ Fixed message field mapping (`message` not `body`)
-- ✅ Fixed user ID mismatch (Clerk vs Skool ID)
-- ✅ Removed prefix from outbound Skool messages
-- ✅ Added conversationProviderId validation for security
+**Session 2026-02-17 Summary:**
+- ✅ Renamed `user_id` → `clerk_user_id` across 8 tables (SQL migration 035)
+- ✅ Renamed `user_id` → `staff_skool_id` on skool_kpis + skool_analytics
+- ✅ Backfilled 5,075 dm_messages rows with correct Clerk IDs (mixed-ID bug fixed)
+- ✅ Updated 36+ TypeScript files across types, lib, routes, crons
+- ✅ Fixed push-members route to match restructured skool_members schema
+- ✅ Full audit: 0 column mismatches remaining
 
 ---
 
@@ -29,7 +29,7 @@
 | Hand-Raiser Extension Routing | 🔄 Deploy | `sections/hand-raiser-extension-routing/BUILD-STATE.md` |
 | Skool Chrome Extension | ✅ Complete | `sections/skool-extension/BUILD-STATE.md` |
 | Skool API Migration | ✅ Complete | `sections/skool-api-migration/BUILD-STATE.md` |
-| ID Column Migration | 🔄 In Progress | `sections/id-migration/BUILD-STATE.md` |
+| ID Column Migration | ✅ Complete | `sections/id-migration/BUILD-STATE.md` |
 | Hand-Raiser UI | ⬜ Planned | `sections/hand-raiser-ui/BUILD-STATE.md` |
 | Cron Fix + Sync Dashboard | ✅ Complete | `sections/sync-dashboard/BUILD-STATE.md` |
 | Skool Scheduler | ✅ Complete | `sections/skool-scheduler/BUILD-STATE.md` |
