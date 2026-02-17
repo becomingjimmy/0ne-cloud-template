@@ -298,6 +298,87 @@ export async function POST(request: NextRequest) {
       }
     }
 
+    // Sync monthly member breakdown to skool_members_monthly table
+    const monthlyNewMetrics = metrics.filter(
+      (m) => m.metricType === 'monthly_new_members'
+    )
+    const monthlyExistingMetrics = metrics.filter(
+      (m) => m.metricType === 'monthly_existing_members'
+    )
+    const monthlyChurnedMetrics = metrics.filter(
+      (m) => m.metricType === 'monthly_churned_members'
+    )
+    const monthlyTotalMetrics = metrics.filter(
+      (m) => m.metricType === 'monthly_total_members'
+    )
+
+    // Only process if we have at least total members data
+    if (monthlyTotalMetrics.length > 0) {
+      // Group all monthly metrics by date
+      const monthlyByDate = new Map<string, { new_members: number; existing_members: number; churned_members: number; total_members: number; groupId: string }>()
+
+      for (const m of monthlyTotalMetrics) {
+        const dateKey = m.metricDate?.match(/^\d{4}-\d{2}-\d{2}/)?.[0]
+        if (!dateKey) continue
+        monthlyByDate.set(dateKey, {
+          new_members: 0,
+          existing_members: 0,
+          churned_members: 0,
+          total_members: m.metricValue,
+          groupId: m.groupId,
+        })
+      }
+
+      for (const m of monthlyNewMetrics) {
+        const dateKey = m.metricDate?.match(/^\d{4}-\d{2}-\d{2}/)?.[0]
+        if (!dateKey) continue
+        const entry = monthlyByDate.get(dateKey)
+        if (entry) entry.new_members = m.metricValue
+      }
+
+      for (const m of monthlyExistingMetrics) {
+        const dateKey = m.metricDate?.match(/^\d{4}-\d{2}-\d{2}/)?.[0]
+        if (!dateKey) continue
+        const entry = monthlyByDate.get(dateKey)
+        if (entry) entry.existing_members = m.metricValue
+      }
+
+      for (const m of monthlyChurnedMetrics) {
+        const dateKey = m.metricDate?.match(/^\d{4}-\d{2}-\d{2}/)?.[0]
+        if (!dateKey) continue
+        const entry = monthlyByDate.get(dateKey)
+        if (entry) entry.churned_members = m.metricValue
+      }
+
+      let monthlyUpserted = 0
+      for (const [dateKey, entry] of monthlyByDate) {
+        const { error: monthlyError } = await supabase
+          .from('skool_members_monthly')
+          .upsert({
+            group_slug: entry.groupId,
+            month: dateKey,
+            new_members: entry.new_members,
+            existing_members: entry.existing_members,
+            churned_members: entry.churned_members,
+            total_members: entry.total_members,
+            source: 'extension',
+            updated_at: new Date().toISOString(),
+          }, {
+            onConflict: 'group_slug,month',
+          })
+
+        if (monthlyError) {
+          console.error(`[Extension API] Error upserting members_monthly for ${dateKey}:`, monthlyError)
+        } else {
+          monthlyUpserted++
+        }
+      }
+
+      if (monthlyUpserted > 0) {
+        console.log(`[Extension API] Synced ${monthlyUpserted} months to skool_members_monthly`)
+      }
+    }
+
     // Sync community activity daily metrics to skool_community_activity_daily
     const activityMetrics = metrics.filter(
       (m) => m.metricType === 'daily_activity_count'
