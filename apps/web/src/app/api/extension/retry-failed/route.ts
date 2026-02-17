@@ -97,7 +97,7 @@ export async function POST(request: NextRequest) {
       .update({ status: 'pending' })
       .eq('direction', 'outbound')
       .eq('status', 'failed')
-      .or(`user_id.eq.${staffSkoolId},staff_skool_id.eq.${staffSkoolId}`)
+      .eq('staff_skool_id', staffSkoolId)
 
     // If specific message IDs provided, filter to those
     if (messageIds && Array.isArray(messageIds) && messageIds.length > 0) {

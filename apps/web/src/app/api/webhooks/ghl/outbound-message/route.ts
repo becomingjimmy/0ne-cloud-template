@@ -37,7 +37,7 @@ export const dynamic = 'force-dynamic'
  * Database row type for dm_messages
  */
 interface DmMessageInsert {
-  user_id: string
+  clerk_user_id: string
   skool_conversation_id: string
   skool_message_id: string
   ghl_message_id: string | null
@@ -57,7 +57,7 @@ interface DmMessageInsert {
  */
 interface ContactMappingRow {
   id: string
-  user_id: string
+  clerk_user_id: string
   skool_user_id: string
   skool_username: string | null
   skool_display_name: string | null
@@ -158,14 +158,14 @@ export async function POST(request: Request) {
     const ghlSenderUserId = (payload as unknown as Record<string, unknown>).userId as string | undefined
 
     const { staff, processedMessage } = await resolveOutboundStaff(
-      typedMapping.user_id,
+      typedMapping.clerk_user_id,
       body,
       ghlSenderUserId,
       typedMapping.skool_user_id
     )
 
     // 7. Look up the real Skool conversation ID from previous messages with this user
-    // Note: dm_messages.user_id stores Skool user ID (staff), not Clerk user ID
+    // Note: dm_messages.staff_skool_id stores the Skool user ID of the staff member
     const staffSkoolId = staff?.skoolUserId
 
     // First try with staff's Skool ID
@@ -173,12 +173,12 @@ export async function POST(request: Request) {
       .from('dm_messages')
       .select('skool_conversation_id')
       .eq('skool_user_id', typedMapping.skool_user_id)
-      .eq('user_id', staffSkoolId || '')
+      .eq('staff_skool_id', staffSkoolId || '')
       .not('skool_conversation_id', 'like', 'ghl:%')
       .limit(1)
       .single()
 
-    // Fallback: just match by Skool user (ignore user_id)
+    // Fallback: just match by Skool user (ignore staff_skool_id)
     if (!conversationResult.data?.skool_conversation_id) {
       conversationResult = await supabase
         .from('dm_messages')
@@ -212,9 +212,9 @@ export async function POST(request: Request) {
 
     // 9. Queue message for sending via Skool API
     // Insert into dm_messages with direction='outbound', status='pending'
-    // Note: user_id should be Skool ID (staff), not Clerk ID
+    // Note: clerk_user_id stores the Clerk ID, staff_skool_id stores the Skool staff ID
     const messageInsert: DmMessageInsert = {
-      user_id: staffSkoolId || typedMapping.skool_user_id,  // Use staff's Skool ID
+      clerk_user_id: typedMapping.clerk_user_id,  // Use Clerk user ID from contact mapping
       skool_conversation_id: skoolConversationId,
       skool_message_id: pendingSkoolMessageId,
       ghl_message_id: messageId || null,

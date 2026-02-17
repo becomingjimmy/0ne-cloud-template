@@ -143,7 +143,7 @@ export async function GET(request: NextRequest) {
     // Debug: First check how many pending outbound messages exist at all
     const { count: totalPending, data: samplePending } = await supabase
       .from('dm_messages')
-      .select('id, user_id, staff_skool_id, source', { count: 'exact' })
+      .select('id, clerk_user_id, staff_skool_id, source', { count: 'exact' })
       .eq('direction', 'outbound')
       .eq('status', 'pending')
       .limit(3)
@@ -154,7 +154,7 @@ export async function GET(request: NextRequest) {
 
     // Query for pending outbound messages
     // These are messages that:
-    // 1. Belong to this staff member (user_id = staffSkoolId OR staff_skool_id = staffSkoolId)
+    // 1. Belong to this staff member (staff_skool_id = staffSkoolId)
     // 2. Are outbound (direction = 'outbound')
     // 3. Are pending (status = 'pending')
     // 4. Have a valid source: GHL (ghl_message_id), hand-raiser, or manual (inbox)
@@ -167,7 +167,7 @@ export async function GET(request: NextRequest) {
     const { data: pendingMessages, error } = await supabase
       .from('dm_messages')
       .select('id, skool_conversation_id, skool_user_id, message_text, created_at, staff_skool_id, staff_display_name, source')
-      .or(`user_id.eq.${staffSkoolId},staff_skool_id.eq.${staffSkoolId}`)
+      .eq('staff_skool_id', staffSkoolId)
       .eq('direction', 'outbound')
       .eq('status', 'pending')
       // Allow both manual (inbox) and ghl messages

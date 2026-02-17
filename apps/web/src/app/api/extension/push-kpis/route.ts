@@ -144,7 +144,7 @@ export async function POST(request: NextRequest) {
     for (const kpi of kpis) {
       try {
         const kpiRow = {
-          user_id: staffSkoolId,
+          staff_skool_id: staffSkoolId,
           group_id: groupId,
           metric_name: kpi.metricName,
           metric_value: kpi.metricValue,

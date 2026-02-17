@@ -155,7 +155,7 @@ export async function POST(request: NextRequest) {
     for (const member of members) {
       try {
         const memberRow: Record<string, unknown> = {
-          user_id: staffSkoolId,
+          staff_skool_id: staffSkoolId,
           group_id: groupId,
           skool_user_id: member.skoolUserId,
           name: member.name || null,
@@ -178,7 +178,7 @@ export async function POST(request: NextRequest) {
         const { error } = await supabase
           .from('skool_members')
           .upsert(memberRow, {
-            onConflict: 'user_id,group_id,skool_user_id',
+            onConflict: 'staff_skool_id,group_id,skool_user_id',
           })
 
         if (error) {

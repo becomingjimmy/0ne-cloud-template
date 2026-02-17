@@ -180,7 +180,7 @@ export async function POST(request: NextRequest) {
         }
 
         const analyticsRow = {
-          user_id: staffSkoolId,
+          staff_skool_id: staffSkoolId,
           group_id: metric.groupId,
           post_id: metric.postId || null,
           metric_type: metric.metricType,
@@ -205,7 +205,7 @@ export async function POST(request: NextRequest) {
                 raw_data: metric.rawData || null,
                 recorded_at: new Date().toISOString(),
               })
-              .eq('user_id', staffSkoolId)
+              .eq('staff_skool_id', staffSkoolId)
               .eq('group_id', metric.groupId)
               .eq('metric_type', metric.metricType)
               .eq('metric_date', metricDate)
