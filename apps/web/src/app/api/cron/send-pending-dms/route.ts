@@ -1,31 +1,23 @@
 /**
  * Send Pending DMs Cron Endpoint
  *
- * Sends pending outbound DMs via Skool API.
- * Runs every 5 minutes via Vercel Cron.
+ * DISABLED: Server-side Skool API calls are blocked by AWS WAF (discovered 2026-02-14).
+ * All outbound DM sending now goes through the Chrome extension, which polls
+ * GET /api/extension/get-pending and sends via the browser's authenticated session.
  *
- * Manual invocation:
- * curl -H "Authorization: Bearer $CRON_SECRET" "http://localhost:3000/api/cron/send-pending-dms"
+ * This cron previously called sendPendingMessages() which tried server-side Skool API
+ * calls. Since AWS WAF blocks those, every message was marked 'failed' - racing the
+ * extension and corrupting the pending queue.
+ *
+ * The cron entry remains in vercel.json as a no-op to avoid deployment errors.
+ * Messages stay 'pending' until the extension picks them up and confirms via
+ * POST /api/extension/confirm-sent.
  */
 
 import { NextRequest, NextResponse } from 'next/server'
-import {
-  sendPendingMessages,
-  getEnabledSyncConfigs,
-  type SendPendingResult,
-} from '@/features/dm-sync'
-import { SyncLogger } from '@/lib/sync-log'
 
-export const maxDuration = 300 // 5 minutes max for send operations
+export const maxDuration = 10
 
-/**
- * GET /api/cron/send-pending-dms
- *
- * Sends pending outbound DMs via Skool for all enabled users.
- *
- * Query params:
- * - user_id: Optional - process only for specific user
- */
 export async function GET(request: NextRequest) {
   // Verify cron secret
   const authHeader = request.headers.get('authorization')
@@ -35,119 +27,13 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 
-  const { searchParams } = new URL(request.url)
-  const specificUserId = searchParams.get('user_id')
+  // No-op: Extension handles all outbound Skool DM delivery.
+  // Server-side Skool API calls are blocked by AWS WAF.
+  console.log('[send-pending-dms] No-op - extension handles outbound delivery')
 
-  const startTime = Date.now()
-  console.log('[send-pending-dms] Starting outbound send')
-
-  const syncLogger = new SyncLogger('skool_dms_outbound')
-  await syncLogger.start({ source: 'cron' })
-
-  try {
-    // Get enabled sync configs
-    const configs = await getEnabledSyncConfigs()
-
-    if (configs.length === 0) {
-      console.log('[send-pending-dms] No enabled sync configs found')
-      await syncLogger.complete(0, { message: 'No enabled sync configs' })
-      return NextResponse.json({
-        success: true,
-        message: 'No enabled sync configs',
-        duration: `${((Date.now() - startTime) / 1000).toFixed(1)}s`,
-      })
-    }
-
-    // Filter to specific user if requested
-    const targetConfigs = specificUserId
-      ? configs.filter((c) => c.user_id === specificUserId)
-      : configs
-
-    if (targetConfigs.length === 0) {
-      await syncLogger.complete(0, { message: 'No matching sync configs' })
-      return NextResponse.json({
-        success: true,
-        message: 'No matching sync configs',
-        duration: `${((Date.now() - startTime) / 1000).toFixed(1)}s`,
-      })
-    }
-
-    console.log(`[send-pending-dms] Processing ${targetConfigs.length} users`)
-
-    // Process each user's pending messages
-    const results: Array<{
-      userId: string
-      result: SendPendingResult
-    }> = []
-
-    for (const config of targetConfigs) {
-      try {
-        console.log(`[send-pending-dms] Processing user: ${config.user_id}`)
-        const result = await sendPendingMessages(config.user_id)
-        results.push({
-          userId: config.user_id,
-          result,
-        })
-      } catch (error) {
-        console.error(
-          `[send-pending-dms] Error processing user ${config.user_id}:`,
-          error instanceof Error ? error.message : error
-        )
-        results.push({
-          userId: config.user_id,
-          result: {
-            sent: 0,
-            failed: 1,
-            errorDetails: [
-              {
-                error: error instanceof Error ? error.message : String(error),
-              },
-            ],
-          },
-        })
-      }
-    }
-
-    // Aggregate results
-    const totals = results.reduce(
-      (acc, r) => ({
-        sent: acc.sent + r.result.sent,
-        failed: acc.failed + r.result.failed,
-      }),
-      { sent: 0, failed: 0 }
-    )
-
-    const duration = ((Date.now() - startTime) / 1000).toFixed(1)
-    console.log(
-      `[send-pending-dms] Completed in ${duration}s: sent=${totals.sent}, failed=${totals.failed}`
-    )
-
-    if (totals.failed === 0) {
-      await syncLogger.complete(totals.sent)
-    } else {
-      await syncLogger.fail(`${totals.failed} sends failed`, totals.sent)
-    }
-
-    return NextResponse.json({
-      success: totals.failed === 0,
-      duration: `${duration}s`,
-      totals,
-      users: results.map((r) => ({
-        userId: r.userId,
-        sent: r.result.sent,
-        failed: r.result.failed,
-      })),
-    })
-  } catch (error) {
-    console.error('[send-pending-dms] Fatal error:', error)
-    await syncLogger.fail(error instanceof Error ? error.message : 'Unknown error')
-    return NextResponse.json(
-      {
-        success: false,
-        error: error instanceof Error ? error.message : 'Unknown error',
-        duration: `${((Date.now() - startTime) / 1000).toFixed(1)}s`,
-      },
-      { status: 500 }
-    )
-  }
+  return NextResponse.json({
+    success: true,
+    message: 'No-op: outbound DMs handled by Chrome extension. Server-side Skool API blocked by AWS WAF.',
+    duration: '0.0s',
+  })
 }
