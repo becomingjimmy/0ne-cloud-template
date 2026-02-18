@@ -8,7 +8,7 @@
 ## Quick Resume
 
 **Last Updated:** 2026-02-17
-**Current Focus:** ID Column Migration complete — next up: Hand-Raiser UI
+**Current Focus:** Extension Incremental Sync — checkpoint-based DM polling + trash button fix
 
 **Session 2026-02-17 Summary:**
 - ✅ Renamed `user_id` → `clerk_user_id` across 8 tables (SQL migration 035)
@@ -17,6 +17,10 @@
 - ✅ Updated 36+ TypeScript files across types, lib, routes, crons
 - ✅ Fixed push-members route to match restructured skool_members schema
 - ✅ Full audit: 0 column mismatches remaining
+- ✅ Deep-dive codebase audit: deleted 6,071 lines of dead server-side Skool API code
+- ✅ Cleaned: skool-client, skool-dm-client, post-client, member-sync, cookie-resolver, 2 dead crons
+- ✅ Preserved: all DB-read functions (metrics, revenue), extension sync engine, aggregation
+- ⚡ 6 remaining cleanup items logged below (P1-P3 priority)
 
 ---
 
@@ -30,6 +34,7 @@
 | Skool Chrome Extension | ✅ Complete | `sections/skool-extension/BUILD-STATE.md` |
 | Skool API Migration | ✅ Complete | `sections/skool-api-migration/BUILD-STATE.md` |
 | ID Column Migration | ✅ Complete | `sections/id-migration/BUILD-STATE.md` |
+| Extension Incremental Sync | 🔄 Active | `sections/extension-incremental-sync/BUILD-STATE.md` |
 | Hand-Raiser UI | ⬜ Planned | `sections/hand-raiser-ui/BUILD-STATE.md` |
 | Cron Fix + Sync Dashboard | ✅ Complete | `sections/sync-dashboard/BUILD-STATE.md` |
 | Skool Scheduler | ✅ Complete | `sections/skool-scheduler/BUILD-STATE.md` |
@@ -45,6 +50,13 @@
 
 ## Next Actions
 
+### Extension Incremental Sync (Active)
+**Fix DM polling to use checkpoints and fix broken trash button**
+
+**To deploy:** Read `sections/extension-incremental-sync/BUILD-STATE.md` and deploy 2 phases SEQUENTIALLY:
+1. Phase 1: Incremental sync (service-worker.ts rewrite)
+2. Phase 2: Trash button fix (types + handler + UI)
+
 ### Hand-Raiser Campaign UI (Queued)
 **Build UI to manage Hand-Raiser campaigns (auto-DM Skool commenters)**
 
@@ -54,9 +66,34 @@
 
 ---
 
-## Cleanup Tasks (from 2026-02-16 session)
+## Cleanup Tasks
 
-1. **Optional: Reduce webhook logging** - Currently verbose for debugging, can trim later
+### From Deep-Dive Audit (2026-02-17)
+
+> Dead code cleanup is DONE (committed `468d41a` on `dev`, 6,071 lines removed).
+> These are the remaining optimization items found during the audit.
+
+**P1 — Security / Correctness:**
+
+1. **[x] Fix `.or()` string interpolation (potential SQL injection)** ~~Done 2026-02-17~~
+
+2. **[x] Add `/skool` and `/media` to middleware `appRoutes`** ~~Done 2026-02-17~~
+
+**P2 — DRY / Code Quality:**
+
+3. **[x] Extract shared `validateExtensionApiKey()` utility** ~~Done 2026-02-17~~
+
+4. **[x] Delete 4 remaining no-op cron route files** ~~Done 2026-02-17~~
+
+**P3 — Dependency Cleanup:**
+
+5. **[x] Remove `SKOOL_EMAIL` and `SKOOL_PASSWORD` from `turbo.json` env vars** ~~Done 2026-02-17~~
+
+6. **[x] Remove Playwright dependency from root `package.json`** ~~Done 2026-02-17~~
+
+### From 2026-02-16 Session
+
+7. **[ ] Optional: Reduce webhook logging** — Currently verbose for debugging, can trim later
 
 ---
 

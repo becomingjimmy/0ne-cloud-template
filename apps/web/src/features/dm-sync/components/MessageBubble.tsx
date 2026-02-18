@@ -67,7 +67,7 @@ export function MessageBubble({ message }: MessageBubbleProps) {
       >
         {/* Message Text */}
         <p className="text-sm whitespace-pre-wrap break-words">
-          {message.message_text || '(empty message)'}
+          {message.message_text || 'Image Attachment(s)'}
         </p>
 
         {/* Timestamp + Status */}
