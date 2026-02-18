@@ -50,15 +50,15 @@ export async function POST(request: NextRequest) {
     for (const p of body.participants) {
       if (!p.conversationId || !p.name) continue
 
-      const { count } = await supabase
+      const { data } = await supabase
         .from('dm_messages')
         .update({ sender_name: p.name })
         .eq('skool_conversation_id', p.conversationId)
         .eq('direction', 'inbound')
         .or('sender_name.is.null,sender_name.eq.')
-        .select('id', { count: 'exact', head: true })
+        .select('id')
 
-      updated += count || 0
+      updated += data?.length || 0
     }
 
     if (updated > 0) {
