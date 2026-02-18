@@ -9,9 +9,13 @@ interface ContactActivity {
   skool_user_id: string
   skool_username: string | null
   skool_display_name: string | null
-  ghl_contact_id: string
-  match_method: 'skool_id' | 'email' | 'name' | 'synthetic' | null
+  ghl_contact_id: string | null
+  match_method: 'skool_id' | 'email' | 'name' | 'synthetic' | 'manual' | 'no_email' | null
+  email: string | null
+  phone: string | null
+  contact_type: 'community_member' | 'dm_contact' | 'unknown' | null
   created_at: string
+  skool_conversation_id: string | null
   stats: {
     inbound_count: number
     outbound_count: number
@@ -28,6 +32,8 @@ interface ContactActivityResponse {
   contacts: ContactActivity[]
   summary: {
     total_contacts: number
+    matched_contacts: number
+    unmatched_contacts: number
     total_messages: number
     contacts_with_pending: number
     contacts_with_failed: number
@@ -54,6 +60,8 @@ export async function GET(request: NextRequest) {
     const status = searchParams.get('status') // 'pending' | 'failed' | 'synced' | 'all'
     const limit = parseInt(searchParams.get('limit') || '50', 10)
     const offset = parseInt(searchParams.get('offset') || '0', 10)
+    const matchStatus = searchParams.get('match_status') || 'all' // 'matched' | 'unmatched' | 'all'
+    const contactType = searchParams.get('contact_type') || 'all' // 'community_member' | 'dm_contact' | 'all'
     const debug = searchParams.get('debug') === 'true'
 
     // Get all contact mappings
@@ -75,6 +83,18 @@ export async function GET(request: NextRequest) {
       mappingsQuery = mappingsQuery.eq('match_method', matchMethod)
     }
 
+    // Apply match status filter
+    if (matchStatus === 'matched') {
+      mappingsQuery = mappingsQuery.not('ghl_contact_id', 'is', null)
+    } else if (matchStatus === 'unmatched') {
+      mappingsQuery = mappingsQuery.is('ghl_contact_id', null)
+    }
+
+    // Apply contact type filter
+    if (contactType && contactType !== 'all') {
+      mappingsQuery = mappingsQuery.eq('contact_type', contactType)
+    }
+
     const { data: mappings, error: mappingsError } = await mappingsQuery
 
     if (mappingsError) {
@@ -87,6 +107,8 @@ export async function GET(request: NextRequest) {
         contacts: [],
         summary: {
           total_contacts: 0,
+          matched_contacts: 0,
+          unmatched_contacts: 0,
           total_messages: 0,
           contacts_with_pending: 0,
           contacts_with_failed: 0,
@@ -122,6 +144,22 @@ export async function GET(request: NextRequest) {
     if (messagesError) {
       console.error('[Contacts API] GET messages error:', messagesError)
       return NextResponse.json({ error: messagesError.message }, { status: 500 })
+    }
+
+    // Get most recent conversation ID for each contact (for inbox deep links)
+    const conversationMap = new Map<string, string>()
+    const { data: conversations } = await supabase
+      .from('dm_messages')
+      .select('skool_user_id, skool_conversation_id, created_at')
+      .in('skool_user_id', skoolUserIds)
+      .order('created_at', { ascending: false })
+
+    if (conversations) {
+      for (const conv of conversations) {
+        if (!conversationMap.has(conv.skool_user_id)) {
+          conversationMap.set(conv.skool_user_id, conv.skool_conversation_id)
+        }
+      }
     }
 
     // Aggregate message stats per user
@@ -192,7 +230,11 @@ export async function GET(request: NextRequest) {
         skool_display_name: mapping.skool_display_name,
         ghl_contact_id: mapping.ghl_contact_id,
         match_method: mapping.match_method as ContactActivity['match_method'],
+        email: mapping.email || null,
+        phone: mapping.phone || null,
+        contact_type: mapping.contact_type || null,
         created_at: mapping.created_at,
+        skool_conversation_id: conversationMap.get(mapping.skool_user_id) || null,
         stats,
         ghl_location_id: config?.ghl_location_id || '',
         skool_community_slug: config?.skool_community_slug || '',
@@ -225,6 +267,8 @@ export async function GET(request: NextRequest) {
     // Calculate summary
     const summary = {
       total_contacts: contactsWithStats.length,
+      matched_contacts: contactsWithStats.filter((c) => c.ghl_contact_id !== null).length,
+      unmatched_contacts: contactsWithStats.filter((c) => c.ghl_contact_id === null).length,
       total_messages: contactsWithStats.reduce(
         (acc, c) => acc + c.stats.inbound_count + c.stats.outbound_count,
         0
