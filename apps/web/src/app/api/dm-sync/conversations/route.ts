@@ -94,6 +94,22 @@ export async function GET(request: NextRequest) {
       .select('skool_user_id, display_name, skool_username')
       .in('skool_user_id', skoolUserIds)
 
+    // Get participant names from conversation_sync_status (extension-pushed Skool API data)
+    const conversationIds = [...new Set(messages.map((m) => m.skool_conversation_id))]
+    const { data: syncStatuses } = await supabase
+      .from('conversation_sync_status')
+      .select('conversation_id, participant_name')
+      .in('conversation_id', conversationIds)
+      .not('participant_name', 'is', null)
+
+    // Build conversation name lookup (conversation_id → participant_name)
+    const conversationNameMap = new Map<string, string>()
+    syncStatuses?.forEach((s) => {
+      if (s.participant_name) {
+        conversationNameMap.set(s.conversation_id, s.participant_name)
+      }
+    })
+
     // Build user lookup map (dm_contact_mappings first, then skool_members fallback)
     const userMap = new Map<string, { username: string | null; display_name: string | null }>()
     members?.forEach((m) => {
@@ -164,11 +180,14 @@ export async function GET(request: NextRequest) {
       )
       const senderName = inboundMessageWithName?.sender_name || anyMessageWithName?.sender_name || null
 
+      // Name from conversation_sync_status (extension-pushed from Skool API)
+      const syncStatusName = conversationNameMap.get(conv.conversation_id) || null
+
       return {
         conversation_id: conv.conversation_id,
         participant: {
           skool_user_id: participantUserId,
-          display_name: userInfo?.display_name || senderName || null,
+          display_name: userInfo?.display_name || syncStatusName || senderName || null,
           username: userInfo?.username || null,
         },
         last_message: conv.last_message

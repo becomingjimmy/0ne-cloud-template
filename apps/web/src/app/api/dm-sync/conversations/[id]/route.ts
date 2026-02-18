@@ -104,6 +104,16 @@ export async function GET(
       .eq('skool_user_id', participantUserId)
       .single()
 
+    // Get participant name from conversation_sync_status (extension-pushed Skool API data)
+    const { data: syncStatus } = await supabase
+      .from('conversation_sync_status')
+      .select('participant_name')
+      .eq('conversation_id', conversationId)
+      .not('participant_name', 'is', null)
+      .limit(1)
+      .single()
+    const syncStatusName = syncStatus?.participant_name || null
+
     // Get sender_name from messages as fallback - look for a valid name (not "Unknown")
     const inboundWithName = messages.find(
       (m) => m.direction === 'inbound' && m.sender_name && m.sender_name !== 'Unknown'
@@ -115,7 +125,7 @@ export async function GET(
 
     const participant: ConversationParticipant = {
       skool_user_id: participantUserId,
-      display_name: mapping?.skool_display_name || member?.display_name || senderName || null,
+      display_name: mapping?.skool_display_name || member?.display_name || syncStatusName || senderName || null,
       username: mapping?.skool_username || member?.skool_username || null,
       ghl_contact_id: mapping?.ghl_contact_id || null,
     }
