@@ -58,3 +58,26 @@ WHERE NOT EXISTS (
 AND m.skool_user_id NOT IN (SELECT skool_user_id FROM staff_users)
 AND m.direction = 'inbound'
 ORDER BY m.clerk_user_id, m.skool_user_id, m.created_at DESC;
+
+-- 7. Backfill: Create entries for ALL skool_members not yet in dm_contact_mappings
+-- This ensures every community member appears in the contacts page
+INSERT INTO dm_contact_mappings (clerk_user_id, skool_user_id, skool_display_name, skool_username, ghl_contact_id, match_method, contact_type, email, created_at)
+SELECT DISTINCT ON (sm.skool_user_id)
+  dcm_ref.clerk_user_id,
+  sm.skool_user_id,
+  sm.display_name,
+  sm.skool_username,
+  sm.ghl_contact_id,
+  CASE WHEN sm.ghl_contact_id IS NOT NULL THEN sm.match_method ELSE NULL END,
+  'community_member',
+  sm.email,
+  NOW()
+FROM skool_members sm
+CROSS JOIN (SELECT DISTINCT clerk_user_id FROM dm_contact_mappings LIMIT 1) dcm_ref
+WHERE NOT EXISTS (
+  SELECT 1 FROM dm_contact_mappings dcm
+  WHERE dcm.skool_user_id = sm.skool_user_id
+    AND dcm.clerk_user_id = dcm_ref.clerk_user_id
+)
+ORDER BY sm.skool_user_id
+ON CONFLICT (clerk_user_id, skool_user_id) DO NOTHING;
