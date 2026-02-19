@@ -11,12 +11,9 @@ export const maxDuration = 300 // 5 minutes for full backfill
 /**
  * POST /api/extension/backfill-emails
  *
- * One-time backfill: extract emails/phones from existing survey_answers
+ * Backfill: extract emails/phones from existing survey_answers
  * in skool_members, update both skool_members and dm_contact_mappings,
  * and auto-match unmatched members against GHL.
- *
- * Also backfills display names from skool_members to dm_contact_mappings
- * where dm_contact_mappings has username-style names.
  */
 
 // =============================================
@@ -60,6 +57,36 @@ function normalizeSurveyAnswers(raw: unknown): unknown[] | null {
   return null
 }
 
+/** Paginated fetch — gets ALL rows matching a query */
+async function fetchAllRows<T>(
+  supabase: ReturnType<typeof createServerClient>,
+  table: string,
+  select: string,
+  filters?: (query: ReturnType<ReturnType<typeof createServerClient>['from']>['select']) => ReturnType<ReturnType<typeof createServerClient>['from']>['select']>
+): Promise<T[]> {
+  const PAGE_SIZE = 1000
+  const allRows: T[] = []
+  let offset = 0
+  let hasMore = true
+
+  while (hasMore) {
+    let query = supabase.from(table).select(select).range(offset, offset + PAGE_SIZE - 1)
+    if (filters) {
+      query = filters(query) as typeof query
+    }
+    const { data, error } = await query
+    if (error) throw error
+    if (!data || data.length === 0) {
+      hasMore = false
+    } else {
+      allRows.push(...(data as T[]))
+      offset += data.length
+      if (data.length < PAGE_SIZE) hasMore = false
+    }
+  }
+  return allRows
+}
+
 export async function POST(request: NextRequest) {
   const authResult = await validateExtensionAuth(request)
   if (!authResult.valid) {
@@ -74,34 +101,31 @@ export async function POST(request: NextRequest) {
       phones_extracted: 0,
       mappings_updated: 0,
       ghl_matched: 0,
-      names_fixed: 0,
     }
 
     // =========================================================================
     // Step 1: Extract emails/phones from survey_answers in skool_members
+    // Paginated — processes ALL members, not just the first 1000
     // =========================================================================
 
-    // Get all members with survey_answers
-    const { data: membersWithSurvey, error: fetchError } = await supabase
-      .from('skool_members')
-      .select('skool_user_id, survey_answers, email, phone, display_name')
-      .not('survey_answers', 'is', null)
+    const membersWithSurvey = await fetchAllRows<{
+      skool_user_id: string
+      survey_answers: unknown
+      email: string | null
+      phone: string | null
+    }>(supabase, 'skool_members', 'skool_user_id, survey_answers, email, phone', (q) =>
+      q.not('survey_answers', 'is', null)
+    )
 
-    if (fetchError) {
-      console.error('[Backfill] Error fetching members:', fetchError)
-      return NextResponse.json({ error: fetchError.message }, { status: 500, headers: corsHeaders })
-    }
+    console.log(`[Backfill] Found ${membersWithSurvey.length} members with survey answers`)
+    stats.members_scanned = membersWithSurvey.length
 
-    console.log(`[Backfill] Found ${membersWithSurvey?.length || 0} members with survey answers`)
-    stats.members_scanned = membersWithSurvey?.length || 0
-
-    for (const member of membersWithSurvey || []) {
+    for (const member of membersWithSurvey) {
       const survey = normalizeSurveyAnswers(member.survey_answers)
       const surveyEmail = extractEmailFromSurvey(survey)
       const surveyPhone = extractPhoneFromSurvey(survey)
       const updates: Record<string, unknown> = {}
 
-      // Only update if we found something AND the member doesn't already have it
       if (surveyEmail && !member.email) {
         updates.email = surveyEmail
         stats.emails_extracted++
@@ -119,78 +143,67 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    console.log(`[Backfill] Extracted ${stats.emails_extracted} emails, ${stats.phones_extracted} phones from surveys`)
+    console.log(`[Backfill] Extracted ${stats.emails_extracted} emails, ${stats.phones_extracted} phones`)
 
     // =========================================================================
-    // Step 2: Sync emails/phones/names from skool_members → dm_contact_mappings
+    // Step 2: Sync emails/phones from skool_members → dm_contact_mappings
     // =========================================================================
 
-    // Get all skool_members with email or phone
-    const { data: membersWithData } = await supabase
-      .from('skool_members')
-      .select('skool_user_id, email, phone, display_name')
-      .or('email.not.is.null,phone.not.is.null')
+    const membersWithData = await fetchAllRows<{
+      skool_user_id: string
+      email: string | null
+      phone: string | null
+    }>(supabase, 'skool_members', 'skool_user_id, email, phone', (q) =>
+      q.or('email.not.is.null,phone.not.is.null')
+    )
 
-    // Get all dm_contact_mappings
-    const { data: allMappings } = await supabase
-      .from('dm_contact_mappings')
-      .select('skool_user_id, email, phone, skool_display_name')
+    const allMappings = await fetchAllRows<{
+      skool_user_id: string
+      email: string | null
+      phone: string | null
+    }>(supabase, 'dm_contact_mappings', 'skool_user_id, email, phone')
 
-    const mappingMap = new Map(allMappings?.map((m) => [m.skool_user_id, m]) || [])
+    const mappingMap = new Map(allMappings.map((m) => [m.skool_user_id, m]))
 
-    for (const member of membersWithData || []) {
+    for (const member of membersWithData) {
       const mapping = mappingMap.get(member.skool_user_id)
       if (!mapping) continue
 
-      const mappingUpdates: Record<string, unknown> = {}
+      const updates: Record<string, unknown> = {}
+      if (member.email && !mapping.email) updates.email = member.email
+      if (member.phone && !mapping.phone) updates.phone = member.phone
 
-      // Backfill email to mapping if missing
-      if (member.email && !mapping.email) {
-        mappingUpdates.email = member.email
-      }
-      // Backfill phone to mapping if missing
-      if (member.phone && !mapping.phone) {
-        mappingUpdates.phone = member.phone
-      }
-      // Fix name: if mapping has a username-style name, use the real display name
-      if (member.display_name && mapping.skool_display_name) {
-        // Username-style names contain hyphens and end with digits (e.g., "george-wilkerson-8010")
-        const isUsernameName = /^[a-z]+-[a-z]+-\d+$/i.test(mapping.skool_display_name)
-        const memberNameLooksReal = !/^[a-z]+-[a-z]+-\d+$/i.test(member.display_name)
-        if (isUsernameName && memberNameLooksReal) {
-          mappingUpdates.skool_display_name = member.display_name
-          stats.names_fixed++
-        }
-      }
-
-      if (Object.keys(mappingUpdates).length > 0) {
-        mappingUpdates.updated_at = new Date().toISOString()
+      if (Object.keys(updates).length > 0) {
+        updates.updated_at = new Date().toISOString()
         await supabase
           .from('dm_contact_mappings')
-          .update(mappingUpdates)
+          .update(updates)
           .eq('skool_user_id', member.skool_user_id)
         stats.mappings_updated++
       }
     }
 
-    console.log(`[Backfill] Updated ${stats.mappings_updated} dm_contact_mappings (${stats.names_fixed} names fixed)`)
+    console.log(`[Backfill] Updated ${stats.mappings_updated} dm_contact_mappings`)
 
     // =========================================================================
     // Step 3: Auto-match unmatched members with email against GHL
     // =========================================================================
 
-    const { data: unmatchedWithEmail } = await supabase
-      .from('skool_members')
-      .select('skool_user_id, email, display_name, skool_username')
-      .is('ghl_contact_id', null)
-      .not('email', 'is', null)
+    const unmatchedWithEmail = await fetchAllRows<{
+      skool_user_id: string
+      email: string | null
+      display_name: string | null
+      skool_username: string | null
+    }>(supabase, 'skool_members', 'skool_user_id, email, display_name, skool_username', (q) =>
+      q.is('ghl_contact_id', null).not('email', 'is', null)
+    )
 
-    if (unmatchedWithEmail && unmatchedWithEmail.length > 0) {
+    if (unmatchedWithEmail.length > 0) {
       console.log(`[Backfill] Auto-matching ${unmatchedWithEmail.length} unmatched members with email...`)
 
       try {
         const ghl = new GHLClient()
-        const MAX_MATCHES = 100 // Process more during backfill
+        const MAX_MATCHES = 200
 
         for (const member of unmatchedWithEmail.slice(0, MAX_MATCHES)) {
           if (!member.email) continue
@@ -198,7 +211,6 @@ export async function POST(request: NextRequest) {
           try {
             const contact = await ghl.searchContactByEmail(member.email)
             if (contact) {
-              // Update skool_members
               await supabase
                 .from('skool_members')
                 .update({
@@ -208,8 +220,6 @@ export async function POST(request: NextRequest) {
                 })
                 .eq('skool_user_id', member.skool_user_id)
 
-              // Update dm_contact_mappings
-              const clerkUserId = authResult.userId || authResult.skoolUserId || ''
               await supabase
                 .from('dm_contact_mappings')
                 .update({
@@ -221,10 +231,8 @@ export async function POST(request: NextRequest) {
                 .eq('skool_user_id', member.skool_user_id)
 
               stats.ghl_matched++
-              console.log(`[Backfill] Matched ${member.email} → GHL ${contact.id}`)
             }
 
-            // Rate limit
             await new Promise((r) => setTimeout(r, 200))
           } catch (matchError) {
             console.error(`[Backfill] Match error for ${member.email}:`, matchError)
@@ -240,7 +248,6 @@ export async function POST(request: NextRequest) {
     }
 
     console.log(`[Backfill] Complete:`, stats)
-
     return NextResponse.json({ success: true, stats }, { headers: corsHeaders })
   } catch (error) {
     console.error('[Backfill] Exception:', error)

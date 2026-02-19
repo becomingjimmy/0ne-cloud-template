@@ -208,9 +208,38 @@ export async function GET(request: NextRequest) {
       if (answers && typeof answers === 'object' && !Array.isArray(answers) && 'survey' in (answers as Record<string, unknown>)) {
         answers = (answers as { survey: unknown }).survey
       }
-      surveyMap.set(m.skool_user_id, Array.isArray(answers) ? answers : null)
-      memberEmailMap.set(m.skool_user_id, m.email || null)
-      memberPhoneMap.set(m.skool_user_id, m.phone || null)
+      const normalizedAnswers = Array.isArray(answers) ? answers as Array<{ question: string; answer: string }> : null
+      surveyMap.set(m.skool_user_id, normalizedAnswers)
+
+      // Email: use stored email, or extract from survey answers on-the-fly
+      let email = m.email || null
+      if (!email && normalizedAnswers) {
+        for (const item of normalizedAnswers) {
+          const ans = item.answer || ''
+          if (ans.includes('@') && ans.includes('.')) {
+            const match = ans.match(/[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/)
+            if (match) { email = match[0].toLowerCase(); break }
+          }
+        }
+      }
+      memberEmailMap.set(m.skool_user_id, email)
+
+      // Phone: use stored phone, or extract from survey answers on-the-fly
+      let phone = m.phone || null
+      if (!phone && normalizedAnswers) {
+        for (const item of normalizedAnswers) {
+          const q = (item.question || '').toLowerCase()
+          const ans = item.answer || ''
+          if (q.includes('phone') || q.includes('cell') || q.includes('mobile') || q.includes('whatsapp')) {
+            const digits = ans.replace(/\D/g, '')
+            if (digits.length >= 10) {
+              phone = digits.length === 10 ? `+1${digits}` : `+${digits}`
+              break
+            }
+          }
+        }
+      }
+      memberPhoneMap.set(m.skool_user_id, phone)
     })
 
     // Build channels map per user (with staff display name lookup)
