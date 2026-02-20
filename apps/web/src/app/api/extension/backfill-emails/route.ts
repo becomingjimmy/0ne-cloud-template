@@ -152,22 +152,25 @@ export async function POST(request: NextRequest) {
     console.log(`[Backfill] Extracted ${stats.emails_extracted} emails, ${stats.phones_extracted} phones`)
 
     // =========================================================================
-    // Step 2: Sync emails/phones from skool_members → dm_contact_mappings
+    // Step 2: Sync data from skool_members → dm_contact_mappings
+    // (emails, phones, usernames, display names)
     // =========================================================================
 
     const membersWithData = await fetchAllRows<{
       skool_user_id: string
       email: string | null
       phone: string | null
-    }>(supabase, 'skool_members', 'skool_user_id, email, phone', (q) =>
-      q.or('email.not.is.null,phone.not.is.null')
-    )
+      skool_username: string | null
+      display_name: string | null
+    }>(supabase, 'skool_members', 'skool_user_id, email, phone, skool_username, display_name')
 
     const allMappings = await fetchAllRows<{
       skool_user_id: string
       email: string | null
       phone: string | null
-    }>(supabase, 'dm_contact_mappings', 'skool_user_id, email, phone')
+      skool_username: string | null
+      skool_display_name: string | null
+    }>(supabase, 'dm_contact_mappings', 'skool_user_id, email, phone, skool_username, skool_display_name')
 
     const mappingMap = new Map(allMappings.map((m) => [m.skool_user_id, m]))
 
@@ -178,6 +181,8 @@ export async function POST(request: NextRequest) {
       const updates: Record<string, unknown> = {}
       if (member.email && !mapping.email) updates.email = member.email
       if (member.phone && !mapping.phone) updates.phone = member.phone
+      if (member.skool_username && !mapping.skool_username) updates.skool_username = member.skool_username
+      if (member.display_name && !mapping.skool_display_name) updates.skool_display_name = member.display_name
 
       if (Object.keys(updates).length > 0) {
         updates.updated_at = new Date().toISOString()

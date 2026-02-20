@@ -83,11 +83,17 @@ function usernameToDisplayName(username: string | null): string {
     .join(' ')
 }
 
-// Helper to build Skool member search URL
+// Helper to build Skool member search URL (for group members — gives admin options)
 function buildSkoolSearchUrl(communitySlug: string, username: string | null): string {
   if (!communitySlug || !username) return ''
   const searchName = usernameToDisplayName(username)
   return `https://www.skool.com/${communitySlug}/-/search?q=${encodeURIComponent(searchName)}&t=members`
+}
+
+// Helper to build direct Skool profile URL (for non-members)
+function buildSkoolProfileUrl(username: string | null): string {
+  if (!username) return ''
+  return `https://www.skool.com/@${username.replace(/^@/, '')}`
 }
 
 // Contact type badge
@@ -265,14 +271,18 @@ function ContactActions({
         </span>
       )}
 
-      {/* Skool Link */}
-      {contact.skool_community_slug && contact.skool_username ? (
+      {/* Skool Link — member search for group members, direct profile for non-members */}
+      {contact.skool_username ? (
         <a
-          href={buildSkoolSearchUrl(contact.skool_community_slug, contact.skool_username)}
+          href={
+            contact.contact_type === 'community_member' && contact.skool_community_slug
+              ? buildSkoolSearchUrl(contact.skool_community_slug, contact.skool_username)
+              : buildSkoolProfileUrl(contact.skool_username)
+          }
           target="_blank"
           rel="noopener noreferrer"
           className="inline-flex items-center justify-center h-7 w-7 rounded text-muted-foreground hover:text-foreground hover:bg-muted"
-          title="Search in Skool"
+          title={contact.contact_type === 'community_member' ? 'Search in Skool' : 'Skool profile'}
         >
           <span className="text-xs font-semibold">S</span>
         </a>
@@ -383,8 +393,17 @@ function MatchedTable({
                     <ContactTypeBadge type={contact.contact_type} />
                   </div>
                 </TableCell>
-                <TableCell className="text-muted-foreground text-sm max-w-[140px] truncate overflow-hidden">
-                  {contact.skool_username ? `@${contact.skool_username}` : '-'}
+                <TableCell className="text-sm max-w-[140px] truncate overflow-hidden">
+                  {contact.skool_username ? (
+                    <a
+                      href={buildSkoolProfileUrl(contact.skool_username)}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-muted-foreground hover:text-foreground hover:underline"
+                    >
+                      @{contact.skool_username}
+                    </a>
+                  ) : '-'}
                 </TableCell>
                 <TableCell className="text-sm text-muted-foreground truncate max-w-[180px]">
                   {contact.email || '-'}
@@ -474,8 +493,17 @@ function UnmatchedTable({
                     </span>
                   </div>
                 </TableCell>
-                <TableCell className="text-muted-foreground text-sm max-w-[140px] truncate overflow-hidden">
-                  {contact.skool_username ? `@${contact.skool_username}` : '-'}
+                <TableCell className="text-sm max-w-[140px] truncate overflow-hidden">
+                  {contact.skool_username ? (
+                    <a
+                      href={buildSkoolProfileUrl(contact.skool_username)}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-muted-foreground hover:text-foreground hover:underline"
+                    >
+                      @{contact.skool_username}
+                    </a>
+                  ) : '-'}
                 </TableCell>
                 <TableCell className="text-sm text-muted-foreground truncate max-w-[180px]">
                   {contact.email || '-'}
