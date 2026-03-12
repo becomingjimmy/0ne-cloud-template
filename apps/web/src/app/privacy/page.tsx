@@ -26,7 +26,7 @@ export default function PrivacyPolicy() {
             <h2 className="text-xl font-semibold mb-3">1. Introduction</h2>
             <p>
               PROJECT1.ai and 0ne Cloud (&quot;we,&quot; &quot;our,&quot; or
-              &quot;us&quot;) are operated by Jimmy Fuentes. This Privacy Policy
+              &quot;us&quot;) are operated by Designed With Pixels LLC. This Privacy Policy
               explains how we collect, use, and protect your information when you
               use our websites (project1.ai and project0ne.ai) and related
               services.
@@ -179,10 +179,10 @@ export default function PrivacyPolicy() {
               For questions about this privacy policy or to exercise your data
               rights, contact us at:{" "}
               <a
-                href="mailto:jimmyafuentes@gmail.com"
+                href="mailto:designedwithpixels@gmail.com"
                 className="text-[#FF692D] underline"
               >
-                jimmyafuentes@gmail.com
+                designedwithpixels@gmail.com
               </a>
             </p>
           </section>
