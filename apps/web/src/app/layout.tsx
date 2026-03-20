@@ -1,7 +1,10 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { Baskervville, Montserrat, JetBrains_Mono } from "next/font/google";
 import { ClerkProvider } from "@clerk/nextjs";
 import { Toaster } from "@0ne/ui";
+import { AppleSplashScreens } from "@/components/pwa/AppleSplashScreens";
+import { InstallPrompt } from "@/components/pwa/InstallPrompt";
+import { ServiceWorkerRegistrar } from "@/components/pwa/ServiceWorkerRegistrar";
 import "./globals.css";
 
 const baskervville = Baskervville({
@@ -23,9 +26,21 @@ const jetbrainsMono = JetBrains_Mono({
   weight: ["400", "500"],
 });
 
+export const viewport: Viewport = {
+  themeColor: "#FF692D",
+};
+
 export const metadata: Metadata = {
   title: "0ne - Everything App",
   description: "Your personal augmentation platform",
+  appleWebApp: {
+    capable: true,
+    statusBarStyle: "default",
+    title: "0ne",
+  },
+  icons: {
+    apple: "/icons/apple-touch-icon.png",
+  },
 };
 
 export default function RootLayout({
@@ -36,11 +51,16 @@ export default function RootLayout({
   return (
     <ClerkProvider>
       <html lang="en">
+        <head>
+          <AppleSplashScreens />
+        </head>
         <body
           className={`${baskervville.variable} ${montserrat.variable} ${jetbrainsMono.variable} font-body antialiased`}
         >
           {children}
           <Toaster />
+          <InstallPrompt />
+          <ServiceWorkerRegistrar />
         </body>
       </html>
     </ClerkProvider>

@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>0ne PWA Loading Animation Preview</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 100vh;
+      background: #1a1a1a;
+      font-family: system-ui;
+    }
+    .preview-container {
+      text-align: center;
+    }
+    .phone-frame {
+      width: 375px;
+      height: 812px;
+      border-radius: 40px;
+      overflow: hidden;
+      border: 4px solid #333;
+      position: relative;
+      cursor: pointer;
+    }
+    .splash {
+      width: 100%;
+      height: 100%;
+      background: #FF692D;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      position: relative;
+    }
+    .logo-container {
+      display: flex;
+      align-items: baseline;
+      opacity: 0;
+    }
+    .logo-o {
+      font-family: 'Georgia', 'Times New Roman', serif;
+      font-style: italic;
+      font-size: 120px;
+      color: white;
+      line-height: 1;
+    }
+    .logo-ne {
+      font-family: 'Georgia', 'Times New Roman', serif;
+      font-style: italic;
+      font-size: 120px;
+      color: white;
+      line-height: 1;
+      overflow: hidden;
+      max-width: 0;
+      opacity: 0;
+    }
+    /* Animation keyframes */
+    @keyframes fadeInO {
+      0% { opacity: 0; }
+      100% { opacity: 1; }
+    }
+    @keyframes expandNe {
+      0% { max-width: 0; opacity: 0; }
+      10% { opacity: 1; }
+      100% { max-width: 200px; opacity: 1; }
+    }
+    @keyframes fadeOutAll {
+      0% { opacity: 1; }
+      100% { opacity: 0; }
+    }
+    .animate .logo-container {
+      animation: fadeInO 0.2s ease-out forwards;
+    }
+    .animate .logo-ne {
+      animation: expandNe 0.6s ease-out 0.5s forwards;
+    }
+    .animate .splash {
+      animation: fadeOutAll 0.4s ease-in 1.4s forwards;
+    }
+    .instructions {
+      color: #999;
+      margin-top: 20px;
+      font-size: 14px;
+    }
+    button {
+      margin-top: 16px;
+      padding: 10px 24px;
+      background: #FF692D;
+      color: white;
+      border: none;
+      border-radius: 8px;
+      font-size: 16px;
+      cursor: pointer;
+    }
+    button:hover { background: #e55a20; }
+  </style>
+</head>
+<body>
+  <div class="preview-container">
+    <div class="phone-frame" id="frame">
+      <div class="splash">
+        <div class="logo-container">
+          <span class="logo-o">O</span>
+          <span class="logo-ne">ne</span>
+        </div>
+      </div>
+    </div>
+    <p class="instructions">Animation: O appears (0.5s hold) → "ne" slides right (0.6s) → hold (0.3s) → fade out (0.4s)</p>
+    <button onclick="replay()">Replay Animation</button>
+  </div>
+  <script>
+    function replay() {
+      const frame = document.getElementById('frame');
+      frame.classList.remove('animate');
+      // Force reflow
+      void frame.offsetWidth;
+      frame.classList.add('animate');
+    }
+    // Auto-play on load
+    window.addEventListener('load', () => setTimeout(replay, 300));
+  </script>
+</body>
+</html>
