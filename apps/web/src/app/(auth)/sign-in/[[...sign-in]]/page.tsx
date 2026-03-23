@@ -1,7 +1,7 @@
 'use client'
 
-import { useState } from 'react'
-import { useSignIn } from '@clerk/nextjs'
+import { useState, useEffect } from 'react'
+import { useSignIn, useAuth } from '@clerk/nextjs'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { Button, Input, Label } from '@0ne/ui'
@@ -10,12 +10,20 @@ import { OAuthButtons } from '../../_components/oauth-buttons'
 
 export default function SignInPage() {
   const { isLoaded, signIn, setActive } = useSignIn()
+  const { isSignedIn } = useAuth()
   const router = useRouter()
 
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
+
+  // If user already has an active session, redirect them away
+  useEffect(() => {
+    if (isLoaded && isSignedIn) {
+      router.replace('/')
+    }
+  }, [isLoaded, isSignedIn, router])
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()

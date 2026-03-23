@@ -7,9 +7,9 @@ export function LoadingScreen() {
   const [animating, setAnimating] = useState(false);
 
   useEffect(() => {
-    // Only show once per session
-    if (sessionStorage.getItem("0ne-splash-shown")) return;
-    sessionStorage.setItem("0ne-splash-shown", "1");
+    // Only show once per browser (persists across tabs/sessions)
+    if (localStorage.getItem("0ne-splash-shown")) return;
+    localStorage.setItem("0ne-splash-shown", "1");
 
     setVisible(true);
     // Start animation after a brief mount delay
