@@ -44,9 +44,24 @@
 - `apps/web/src/app/kpi/expenses/page.tsx` — Reference for UI patterns
 - `apps/web/src/features/kpi/hooks/use-kpi-data.ts` — Reference for hooks
 
+### Phase 4: Plaid Banking Integration
+- [x] Plaid account linking and balance display
+- [x] Transaction sync via cron (plaid_transactions table)
+- [x] "All Transactions" tab with search and pagination
+- [x] "Add to Expenses" button to promote transactions to tracked expenses
+- [x] Category auto-mapping (plaid_category_mappings table)
+
+### Phase 5: iOS Widget
+- [x] Widget API endpoint: GET /api/widget/metrics
+- [x] Bearer token auth (WIDGET_API_KEY env var)
+- [x] Returns: Cash On Hand, Burn Rate, Runway (Days/Months)
+- [x] SheetWidget.js (Scriptable iOS app) in widget/ directory
+
 ## Notes
 
 - Personal categories: Housing, Food, Transportation, Subscriptions (minimal set)
 - No business logic: no ad_metrics, no ROI, no channel performance
 - Separate tables from business expenses
-- Future: Relay.fi banking integration via Plaid for live balance data
+- Plaid banking integration live (accounts, transactions, balances)
+- **Auto-import REMOVED (2026-03-23):** sync-plaid cron no longer auto-creates personal_expenses. Users manually promote transactions via "Add to Expenses" button.
+- iOS widget lives in `widget/` directory — see widget/README.md for API dependency

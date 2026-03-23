@@ -45,7 +45,6 @@ export async function GET(request: Request) {
     })
 
     let totalSynced = 0
-    let totalImported = 0
     let errors = 0
 
     for (const item of items) {
@@ -81,7 +80,7 @@ export async function GET(request: Request) {
             mappedCategory = mappingLookup.get(primary) || null
           }
 
-          const { data: txnRow, error: txnError } = await supabase
+          const { error: txnError } = await supabase
             .from('plaid_transactions')
             .upsert({
               transaction_id: txn.transaction_id,
@@ -96,36 +95,9 @@ export async function GET(request: Request) {
               mapped_category: mappedCategory,
               is_pending: txn.pending || false,
             }, { onConflict: 'transaction_id' })
-            .select('id, is_excluded, personal_expense_id')
-            .single()
 
           if (txnError) continue
           totalSynced++
-
-          // Auto-import
-          if (mappedCategory && !txnRow.is_excluded && !txnRow.personal_expense_id && txn.amount > 0) {
-            const { data: expense } = await supabase
-              .from('personal_expenses')
-              .insert({
-                name: txn.merchant_name || txn.name || 'Unknown',
-                category: mappedCategory,
-                amount: Math.abs(txn.amount),
-                expense_date: txn.date,
-                frequency: 'one_time',
-                is_active: true,
-                notes: `Auto-imported from Plaid (${txn.transaction_id})`,
-              })
-              .select('id')
-              .single()
-
-            if (expense) {
-              await supabase
-                .from('plaid_transactions')
-                .update({ personal_expense_id: expense.id })
-                .eq('id', txnRow.id)
-              totalImported++
-            }
-          }
         }
 
         // Process modified
@@ -178,7 +150,6 @@ export async function GET(request: Request) {
     return NextResponse.json({
       success: true,
       synced: totalSynced,
-      imported: totalImported,
       errors,
       items_processed: items.length,
       timestamp: new Date().toISOString(),

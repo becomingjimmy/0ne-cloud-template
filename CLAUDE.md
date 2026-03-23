@@ -80,6 +80,7 @@ This nimble hub shows what's active and points to the right feature BUILD-STATE.
 - Skool Scheduler - Automated post publishing
 - Skool Sync - Sync Skool messages with GoHighLevel CRM
 - GHL Media Manager - Media library management
+- Personal Expenses - Expense tracking with Plaid bank integration
 
 ---
 
@@ -104,9 +105,6 @@ This nimble hub shows what's active and points to the right feature BUILD-STATE.
 │   ├── BUILD-STATE.md       ← Nimble hub (read FIRST)
 │   ├── COMPLETED-FEATURES.md← Archived features
 │   └── sections/            ← Per-feature BUILD-STATEs
-│       ├── skool-sync/BUILD-STATE.md
-│       ├── skool-scheduler/BUILD-STATE.md
-│       └── media/BUILD-STATE.md
 ├── apps/
 │   └── web/                 ← Next.js app
 │       └── src/
@@ -117,6 +115,7 @@ This nimble hub shows what's active and points to the right feature BUILD-STATE.
 │   ├── ui/                  ← Shared UI components
 │   ├── db/                  ← Database client + schemas
 │   └── auth/                ← Auth utilities
+├── widget/                  ← iOS Scriptable widget (see below)
 ```
 
 ---
@@ -147,6 +146,25 @@ psql "$DATABASE_URL" -f packages/db/schemas/{migration}.sql
 # Run cron manually
 curl -H "Authorization: Bearer $CRON_SECRET" "http://localhost:3000/api/cron/{job}"
 ```
+
+---
+
+## iOS Widget (IMPORTANT - External Consumer)
+
+**Location:** `widget/SheetWidget.js` (Scriptable iOS app)
+
+**API endpoint:** `GET /api/widget/metrics` (`apps/web/src/app/api/widget/metrics/route.ts`)
+
+**Auth:** Bearer token via `WIDGET_API_KEY` env var (NOT Clerk — widgets can't do browser sessions)
+
+**What it returns:** 4 personal finance KPIs (Cash On Hand, Burn Rate, Runway Days, Runway Months)
+
+**If you change the widget API:** The iPhone widget will break. Check:
+- Response shape: `{ metrics: [{ label, value }], updatedAt }` must be preserved
+- `WIDGET_API_KEY` env var must be set in Vercel
+- Queries: `plaid_accounts` (balances) and `personal_expenses` (burn rate)
+
+See `widget/README.md` for full architecture.
 
 ---
 
