@@ -6,7 +6,8 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server'
-import { createServerClient } from '@0ne/db/server'
+import { db, eq, asc } from '@0ne/db/server'
+import { telemetryEvents, telemetryStatusHistory } from '@0ne/db/server'
 
 export const dynamic = 'force-dynamic'
 
@@ -46,46 +47,28 @@ export async function GET(
 
   try {
     const { id } = await params
-    const supabase = createServerClient()
 
     // Fetch event and status history in parallel
-    const [eventResult, historyResult] = await Promise.all([
-      supabase
-        .from('telemetry_events')
-        .select('*')
-        .eq('id', id)
-        .single(),
+    const [events, history] = await Promise.all([
+      db.select().from(telemetryEvents)
+        .where(eq(telemetryEvents.id, id)),
 
-      supabase
-        .from('telemetry_status_history')
-        .select('*')
-        .eq('event_id', id)
-        .order('created_at', { ascending: true }),
+      db.select().from(telemetryStatusHistory)
+        .where(eq(telemetryStatusHistory.eventId, id))
+        .orderBy(asc(telemetryStatusHistory.createdAt)),
     ])
 
-    if (eventResult.error) {
-      if (eventResult.error.code === 'PGRST116') {
-        return NextResponse.json(
-          { error: 'Event not found' },
-          { status: 404, headers: corsHeaders }
-        )
-      }
-      console.error('[Installs Detail API] Query error:', eventResult.error)
+    if (events.length === 0) {
       return NextResponse.json(
-        { error: eventResult.error.message },
-        { status: 500, headers: corsHeaders }
+        { error: 'Event not found' },
+        { status: 404, headers: corsHeaders }
       )
-    }
-
-    if (historyResult.error) {
-      console.error('[Installs Detail API] History query error:', historyResult.error)
-      // Non-fatal — return event without history
     }
 
     return NextResponse.json(
       {
-        event: eventResult.data,
-        status_history: historyResult.data || [],
+        event: events[0],
+        status_history: history,
       },
       { headers: corsHeaders }
     )

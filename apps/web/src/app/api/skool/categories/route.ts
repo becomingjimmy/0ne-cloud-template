@@ -14,7 +14,8 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server'
-import { createServerClient } from '@0ne/db/server'
+import { db, eq, asc } from '@0ne/db/server'
+import { skoolCategories } from '@0ne/db/server'
 
 export const dynamic = 'force-dynamic'
 
@@ -32,26 +33,25 @@ export async function GET(request: NextRequest) {
     const { searchParams } = new URL(request.url)
     const groupSlug = searchParams.get('group') || 'fruitful'
 
-    const supabase = createServerClient()
-
     // Get categories from database cache
-    const { data: cachedCategories, error: cacheError } = await supabase
-      .from('skool_categories')
-      .select('skool_id, name, position, fetched_at')
-      .eq('group_slug', groupSlug)
-      .order('position')
-
-    if (cacheError) {
-      console.warn('[Categories API] Cache fetch error:', cacheError.message)
-    }
+    const cachedCategories = await db
+      .select({
+        skoolId: skoolCategories.skoolId,
+        name: skoolCategories.name,
+        position: skoolCategories.position,
+        fetchedAt: skoolCategories.fetchedAt,
+      })
+      .from(skoolCategories)
+      .where(eq(skoolCategories.groupSlug, groupSlug))
+      .orderBy(asc(skoolCategories.position))
 
     // If we have cached categories, return them
-    if (cachedCategories && cachedCategories.length > 0) {
-      const lastFetched = cachedCategories[0]?.fetched_at
+    if (cachedCategories.length > 0) {
+      const lastFetched = cachedCategories[0]?.fetchedAt
 
       return NextResponse.json({
         categories: cachedCategories.map((c) => ({
-          id: c.skool_id,
+          id: c.skoolId,
           name: c.name,
         })),
         source: 'database',
@@ -91,28 +91,27 @@ export async function POST(request: NextRequest) {
 
     console.log(`[Categories API] Refresh requested for group: ${groupSlug} (DB-only, no server-side fetch)`)
 
-    const supabase = createServerClient()
-
     // Return what we have in the database
-    const { data: cachedCategories, error: cacheError } = await supabase
-      .from('skool_categories')
-      .select('skool_id, name, position, fetched_at')
-      .eq('group_slug', groupSlug)
-      .order('position')
+    const cachedCategories = await db
+      .select({
+        skoolId: skoolCategories.skoolId,
+        name: skoolCategories.name,
+        position: skoolCategories.position,
+        fetchedAt: skoolCategories.fetchedAt,
+      })
+      .from(skoolCategories)
+      .where(eq(skoolCategories.groupSlug, groupSlug))
+      .orderBy(asc(skoolCategories.position))
 
-    if (cacheError) {
-      console.warn('[Categories API] Cache fetch error:', cacheError.message)
-    }
-
-    if (cachedCategories && cachedCategories.length > 0) {
+    if (cachedCategories.length > 0) {
       return NextResponse.json({
         success: true,
         categories: cachedCategories.map((c) => ({
-          id: c.skool_id,
+          id: c.skoolId,
           name: c.name,
         })),
         source: 'database',
-        lastFetched: cachedCategories[0]?.fetched_at,
+        lastFetched: cachedCategories[0]?.fetchedAt,
         count: cachedCategories.length,
         note: 'Categories come from extension sync. Ensure the Chrome extension is running.',
       })

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { createServerClient } from '@0ne/db/server'
+import { db, eq, rawSql } from '@0ne/db/server'
+import { skoolScheduledPosts, skoolPostLibrary, skoolPostExecutionLog, skoolOneoffPosts } from '@0ne/db/server'
 import { corsHeaders, validateExtensionApiKey } from '@/lib/extension-auth'
 
 export { OPTIONS } from '@/lib/extension-auth'
@@ -59,8 +60,7 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    const supabase = createServerClient()
-    const now = new Date().toISOString()
+    const now = new Date()
 
     console.log(
       `[Extension API] Confirm posted: postId=${body.postId}, success=${body.success}, skoolPostId=${body.skoolPostId || 'N/A'}`
@@ -81,42 +81,39 @@ export async function POST(request: NextRequest) {
 
       if (body.success) {
         // Update the schedule's last_run_at
-        const { error: scheduleError } = await supabase
-          .from('skool_scheduled_posts')
-          .update({ last_run_at: now, updated_at: now })
-          .eq('id', scheduleId)
-
-        if (scheduleError) {
+        try {
+          await db.update(skoolScheduledPosts)
+            .set({ lastRunAt: now, updatedAt: now })
+            .where(eq(skoolScheduledPosts.id, scheduleId))
+        } catch (scheduleError) {
           console.error('[Extension API] Error updating schedule:', scheduleError)
         }
 
-        // Update the library post's usage stats
-        const { error: libraryError } = await supabase
-          .from('skool_post_library')
-          .update({
-            last_used_at: now,
-            use_count: supabase.rpc('increment_use_count', { row_id: libraryId }),
-            updated_at: now,
-          })
-          .eq('id', libraryId)
-
-        if (libraryError) {
-          // Try a simpler update without RPC
-          await supabase.rpc('mark_post_used', { p_post_id: libraryId })
+        // Update the library post's usage stats (increment use_count via SQL)
+        try {
+          await db.update(skoolPostLibrary)
+            .set({
+              lastUsedAt: now,
+              useCount: rawSql`COALESCE(use_count, 0) + 1`,
+              updatedAt: now,
+            })
+            .where(eq(skoolPostLibrary.id, libraryId))
+        } catch (libraryError) {
+          console.error('[Extension API] Error updating library post:', libraryError)
         }
 
         // Log the execution
-        const { error: logError } = await supabase.from('skool_post_execution_log').insert({
-          scheduler_id: scheduleId,
-          post_library_id: libraryId,
-          executed_at: now,
-          status: 'success',
-          skool_post_id: body.skoolPostId || null,
-          skool_post_url: body.skoolPostUrl || null,
-          email_blast_sent: body.emailBlastSent || false,
-        })
-
-        if (logError) {
+        try {
+          await db.insert(skoolPostExecutionLog).values({
+            schedulerId: scheduleId,
+            postLibraryId: libraryId,
+            executedAt: now,
+            status: 'success',
+            skoolPostId: body.skoolPostId || null,
+            skoolPostUrl: body.skoolPostUrl || null,
+            emailBlastSent: body.emailBlastSent || false,
+          })
+        } catch (logError) {
           console.error('[Extension API] Error logging execution:', logError)
         }
 
@@ -126,13 +123,17 @@ export async function POST(request: NextRequest) {
         )
       } else {
         // Log the failure
-        await supabase.from('skool_post_execution_log').insert({
-          scheduler_id: scheduleId,
-          post_library_id: libraryId,
-          executed_at: now,
-          status: 'failed',
-          error_message: body.error || 'Unknown error',
-        })
+        try {
+          await db.insert(skoolPostExecutionLog).values({
+            schedulerId: scheduleId,
+            postLibraryId: libraryId,
+            executedAt: now,
+            status: 'failed',
+            errorMessage: body.error || 'Unknown error',
+          })
+        } catch (logError) {
+          console.error('[Extension API] Error logging failure:', logError)
+        }
 
         return NextResponse.json(
           { success: true, message: 'Failure logged for recurring post' } as ConfirmPostedResponse,
@@ -144,36 +145,35 @@ export async function POST(request: NextRequest) {
     // Handle one-off posts
     if (body.success) {
       // Update the one-off post as published
-      const { error: updateError } = await supabase
-        .from('skool_oneoff_posts')
-        .update({
+      try {
+        await db.update(skoolOneoffPosts).set({
           status: 'published',
-          published_at: now,
-          skool_post_id: body.skoolPostId || null,
-          skool_post_url: body.skoolPostUrl || null,
-          updated_at: now,
-        })
-        .eq('id', body.postId)
-
-      if (updateError) {
+          publishedAt: now,
+          skoolPostId: body.skoolPostId || null,
+          skoolPostUrl: body.skoolPostUrl || null,
+          updatedAt: now,
+        }).where(eq(skoolOneoffPosts.id, body.postId))
+      } catch (updateError) {
         console.error('[Extension API] Error updating one-off post:', updateError)
         return NextResponse.json(
-          { success: false, message: '', error: updateError.message },
+          { success: false, message: '', error: updateError instanceof Error ? updateError.message : 'Unknown error' },
           { status: 500, headers: corsHeaders }
         )
       }
 
-      // If email blast was sent, record it
+      // If email blast was sent, record it via raw SQL (RPC equivalent)
       if (body.emailBlastSent) {
-        // Get the group_slug from the post
-        const { data: post } = await supabase
-          .from('skool_oneoff_posts')
-          .select('group_slug')
-          .eq('id', body.postId)
-          .single()
+        const postRows = await db.select({ groupSlug: skoolOneoffPosts.groupSlug })
+          .from(skoolOneoffPosts)
+          .where(eq(skoolOneoffPosts.id, body.postId))
+        const post = postRows[0]
 
-        if (post?.group_slug) {
-          await supabase.rpc('record_email_blast', { p_group_slug: post.group_slug })
+        if (post?.groupSlug) {
+          try {
+            await db.execute(rawSql`SELECT record_email_blast(${post.groupSlug})`)
+          } catch (rpcError) {
+            console.error('[Extension API] Error recording email blast:', rpcError)
+          }
         }
       }
 
@@ -185,16 +185,13 @@ export async function POST(request: NextRequest) {
       )
     } else {
       // Mark as failed
-      const { error: updateError } = await supabase
-        .from('skool_oneoff_posts')
-        .update({
+      try {
+        await db.update(skoolOneoffPosts).set({
           status: 'failed',
-          error_message: body.error || 'Unknown error',
-          updated_at: now,
-        })
-        .eq('id', body.postId)
-
-      if (updateError) {
+          errorMessage: body.error || 'Unknown error',
+          updatedAt: now,
+        }).where(eq(skoolOneoffPosts.id, body.postId))
+      } catch (updateError) {
         console.error('[Extension API] Error marking post as failed:', updateError)
       }
 

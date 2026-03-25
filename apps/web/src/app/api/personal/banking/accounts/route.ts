@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { auth } from '@clerk/nextjs/server'
-import { createServerClient } from '@0ne/db/server'
+import { db, eq, desc, inArray, asc } from '@0ne/db/server'
+import { plaidItems, plaidAccounts } from '@0ne/db/server'
 
 export const dynamic = 'force-dynamic'
 
@@ -11,53 +12,34 @@ export async function GET() {
   }
 
   try {
-    const supabase = createServerClient()
-
     // Get all items with their accounts
-    const { data: items, error: itemsError } = await supabase
-      .from('plaid_items')
-      .select(`
-        id,
-        item_id,
-        institution_id,
-        institution_name,
-        status,
-        error_code,
-        last_synced_at,
-        created_at
-      `)
-      .order('created_at', { ascending: false })
-
-    if (itemsError) {
-      console.error('Fetch plaid items error:', itemsError)
-      return NextResponse.json(
-        { error: 'Failed to fetch accounts', details: itemsError.message },
-        { status: 500 }
-      )
-    }
+    const items = await db.select({
+      id: plaidItems.id,
+      itemId: plaidItems.itemId,
+      institutionId: plaidItems.institutionId,
+      institutionName: plaidItems.institutionName,
+      status: plaidItems.status,
+      errorCode: plaidItems.errorCode,
+      lastSyncedAt: plaidItems.lastSyncedAt,
+      createdAt: plaidItems.createdAt,
+    }).from(plaidItems)
+      .orderBy(desc(plaidItems.createdAt))
 
     // Get accounts for all items
-    const itemIds = (items || []).map((item) => item.id)
+    const itemIds = items.map((item) => item.id)
 
-    let accounts: any[] = []
+    let accounts: (typeof plaidAccounts.$inferSelect)[] = []
     if (itemIds.length > 0) {
-      const { data: accountData, error: accountsError } = await supabase
-        .from('plaid_accounts')
-        .select('*')
-        .in('item_id', itemIds)
-        .order('type')
-
-      if (accountsError) {
-        console.error('Fetch plaid accounts error:', accountsError)
-      } else {
-        accounts = accountData || []
-      }
+      accounts = await db.select()
+        .from(plaidAccounts)
+        .where(inArray(plaidAccounts.itemId, itemIds))
+        .orderBy(asc(plaidAccounts.type))
     }
 
     // Group accounts by item
-    const result = (items || []).map((item) => ({
+    const result = items.map((item) => ({
       ...item,
-      accounts: accounts.filter((a) => a.item_id === item.id),
+      accounts: accounts.filter((a) => a.itemId === item.id),
     }))
 
     return NextResponse.json({ items: result })

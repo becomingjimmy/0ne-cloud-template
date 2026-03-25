@@ -7,7 +7,8 @@
 
 import { NextResponse } from 'next/server'
 import { auth } from '@clerk/nextjs/server'
-import { createServerClient } from '@0ne/db/server'
+import { db, eq, count, isNotNull } from '@0ne/db/server'
+import { telemetryEvents } from '@0ne/db/server'
 
 export const dynamic = 'force-dynamic'
 
@@ -18,45 +19,29 @@ export async function GET() {
   }
 
   try {
-    const supabase = createServerClient()
-
     // Run all aggregate queries in parallel
-    const [installsResult, doctorResult, allEventsResult, fixEventsResult] = await Promise.all([
+    const [installsCount, doctorCount, allEvents, fixEvents] = await Promise.all([
       // Count installs
-      supabase
-        .from('telemetry_events')
-        .select('*', { count: 'exact', head: true })
-        .eq('event_type', 'install'),
+      db.select({ count: count() }).from(telemetryEvents)
+        .where(eq(telemetryEvents.eventType, 'install')),
 
       // Count doctor runs
-      supabase
-        .from('telemetry_events')
-        .select('*', { count: 'exact', head: true })
-        .eq('event_type', 'doctor'),
+      db.select({ count: count() }).from(telemetryEvents)
+        .where(eq(telemetryEvents.eventType, 'doctor')),
 
       // Fetch all events with summary for success rate + avg issues calculation
-      supabase
-        .from('telemetry_events')
-        .select('summary'),
+      db.select({ summary: telemetryEvents.summary }).from(telemetryEvents),
 
       // Fetch events with fix_summary for total fixes count
-      supabase
-        .from('telemetry_events')
-        .select('fix_summary')
-        .not('fix_summary', 'is', null),
+      db.select({ fixSummary: telemetryEvents.fixSummary }).from(telemetryEvents)
+        .where(isNotNull(telemetryEvents.fixSummary)),
     ])
 
-    if (installsResult.error || doctorResult.error || allEventsResult.error || fixEventsResult.error) {
-      const err = installsResult.error || doctorResult.error || allEventsResult.error || fixEventsResult.error
-      console.error('[Installs Dashboard Stats API] Query error:', err)
-      return NextResponse.json({ error: err!.message }, { status: 500 })
-    }
-
-    const totalInstalls = installsResult.count || 0
-    const totalDoctorRuns = doctorResult.count || 0
+    const totalInstalls = installsCount[0]?.count ?? 0
+    const totalDoctorRuns = doctorCount[0]?.count ?? 0
 
     // Calculate success rate and average issues from summary data
-    const events = allEventsResult.data || []
+    const events = allEvents
     let successCount = 0
     let totalFails = 0
     let eventsWithSummary = 0
@@ -83,11 +68,10 @@ export async function GET() {
       : 0
 
     // Sum total successful fixes from fix_summary JSONB
-    const fixEvents = fixEventsResult.data || []
     let totalFixes = 0
     for (const event of fixEvents) {
-      if (event.fix_summary && typeof event.fix_summary === 'object') {
-        const fs = event.fix_summary as Record<string, unknown>
+      if (event.fixSummary && typeof event.fixSummary === 'object') {
+        const fs = event.fixSummary as Record<string, unknown>
         const succeeded = parseInt(String(fs.fixes_succeeded || '0'), 10)
         if (!isNaN(succeeded)) {
           totalFixes += succeeded

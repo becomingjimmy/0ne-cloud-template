@@ -6,7 +6,8 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server'
-import { createServerClient } from '@0ne/db/server'
+import { db, eq, gte, lte, ilike, desc, count, and } from '@0ne/db/server'
+import { telemetryEvents } from '@0ne/db/server'
 
 export const dynamic = 'force-dynamic'
 
@@ -52,52 +53,46 @@ export async function GET(request: NextRequest) {
     const dateFrom = searchParams.get('date_from')
     const dateTo = searchParams.get('date_to')
 
-    const supabase = createServerClient()
-
-    // Build query with filters
-    let query = supabase
-      .from('telemetry_events')
-      .select('*', { count: 'exact' })
-
+    // Build dynamic filter conditions
+    const conditions = []
     if (eventType) {
-      query = query.eq('event_type', eventType)
+      conditions.push(eq(telemetryEvents.eventType, eventType))
     }
     if (platform) {
-      query = query.eq('platform', platform)
+      conditions.push(eq(telemetryEvents.platform, platform))
     }
     if (status) {
-      query = query.eq('status', status)
+      conditions.push(eq(telemetryEvents.status, status))
     }
     if (principalName) {
-      query = query.ilike('principal_name', `%${principalName}%`)
+      conditions.push(ilike(telemetryEvents.principalName, `%${principalName}%`))
     }
     if (dateFrom) {
-      query = query.gte('created_at', dateFrom)
+      conditions.push(gte(telemetryEvents.createdAt, new Date(dateFrom)))
     }
     if (dateTo) {
-      query = query.lte('created_at', dateTo)
+      conditions.push(lte(telemetryEvents.createdAt, new Date(dateTo)))
     }
+
+    const whereClause = conditions.length > 0 ? and(...conditions) : undefined
 
     // Pagination
-    const from = (page - 1) * perPage
-    const to = from + perPage - 1
+    const offset = (page - 1) * perPage
 
-    const { data, error, count } = await query
-      .order('created_at', { ascending: false })
-      .range(from, to)
-
-    if (error) {
-      console.error('[Installs API] Query error:', error)
-      return NextResponse.json(
-        { error: error.message },
-        { status: 500, headers: corsHeaders }
-      )
-    }
+    const [data, countResult] = await Promise.all([
+      db.select().from(telemetryEvents)
+        .where(whereClause)
+        .orderBy(desc(telemetryEvents.createdAt))
+        .limit(perPage)
+        .offset(offset),
+      db.select({ count: count() }).from(telemetryEvents)
+        .where(whereClause),
+    ])
 
     return NextResponse.json(
       {
-        data: data || [],
-        total: count || 0,
+        data,
+        total: countResult[0]?.count ?? 0,
         page,
         per_page: perPage,
       },

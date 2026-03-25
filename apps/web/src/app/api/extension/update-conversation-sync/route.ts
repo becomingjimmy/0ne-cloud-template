@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { createServerClient } from '@0ne/db/server'
+import { db } from '@0ne/db/server'
+import { conversationSyncStatus } from '@0ne/db/server'
 import { corsHeaders, validateExtensionAuth } from '@/lib/extension-auth'
 
 export { OPTIONS } from '@/lib/extension-auth'
@@ -78,34 +79,32 @@ export async function POST(request: NextRequest) {
       `[Extension API] Updating sync status for conversation ${conversationId} (staff: ${staffSkoolId}, complete: ${backfillComplete}, messages: ${messagesSynced})`
     )
 
-    const supabase = createServerClient()
-
     // Upsert sync status (insert or update)
-    const { error } = await supabase
-      .from('conversation_sync_status')
-      .upsert(
-        {
-          staff_skool_id: staffSkoolId,
-          conversation_id: conversationId,
-          participant_name: participantName || null,
-          last_synced_message_id: lastSyncedMessageId,
-          last_synced_message_time: lastSyncedMessageTime,
-          backfill_complete: backfillComplete,
-          last_sync_time: new Date().toISOString(),
-          // Use SQL expression to increment total_messages_synced
-          // For now, just set it (we'll accumulate on subsequent syncs)
-          total_messages_synced: messagesSynced,
+    try {
+      await db.insert(conversationSyncStatus).values({
+        staffSkoolId,
+        conversationId,
+        participantName: participantName || null,
+        lastSyncedMessageId,
+        lastSyncedMessageTime: new Date(lastSyncedMessageTime),
+        backfillComplete,
+        lastSyncTime: new Date(),
+        totalMessagesSynced: messagesSynced,
+      }).onConflictDoUpdate({
+        target: [conversationSyncStatus.staffSkoolId, conversationSyncStatus.conversationId],
+        set: {
+          participantName: participantName || null,
+          lastSyncedMessageId,
+          lastSyncedMessageTime: new Date(lastSyncedMessageTime),
+          backfillComplete,
+          lastSyncTime: new Date(),
+          totalMessagesSynced: messagesSynced,
         },
-        {
-          onConflict: 'staff_skool_id,conversation_id',
-          ignoreDuplicates: false,
-        }
-      )
-
-    if (error) {
-      console.error('[Extension API] Error updating sync status:', error)
+      })
+    } catch (dbError) {
+      console.error('[Extension API] Error updating sync status:', dbError)
       return NextResponse.json(
-        { success: false, updated: false, error: error.message },
+        { success: false, updated: false, error: dbError instanceof Error ? dbError.message : 'Unknown error' },
         { status: 500, headers: corsHeaders }
       )
     }

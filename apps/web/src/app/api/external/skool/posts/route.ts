@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { createServerClient } from '@0ne/db/server'
+import { db, eq, desc } from '@0ne/db/server'
+import { skoolPostLibrary } from '@0ne/db/server'
 import { validateExternalApiKey } from '../../auth'
 import type { PostLibraryStatus } from '@0ne/db'
 
@@ -45,7 +46,6 @@ export async function POST(request: NextRequest) {
   if (authError) return authError
 
   try {
-    const supabase = createServerClient()
     const body: CreatePostsRequest = await request.json()
 
     // Validate request structure
@@ -78,32 +78,24 @@ export async function POST(request: NextRequest) {
     const postsToInsert = body.posts.map((post) => ({
       title: post.title.trim(),
       body: post.body.trim(),
-      category: post.category?.trim() || 'Uncategorized', // Default to Uncategorized
-      variation_group_id: post.variation_group_id || null,
-      image_url: post.image_url || null,
-      video_url: post.video_url || null,
-      day_of_week: null, // Not used for API-created posts
-      time: null, // Not used for API-created posts
-      is_active: true,
+      category: post.category?.trim() || 'Uncategorized',
+      variationGroupId: post.variation_group_id || null,
+      imageUrl: post.image_url || null,
+      videoUrl: post.video_url || null,
+      dayOfWeek: null as number | null,
+      time: null as string | null,
+      isActive: true,
       status: 'draft' as const,
       source: 'api' as const,
     }))
 
     // Insert all posts
-    const { data, error } = await supabase
-      .from('skool_post_library')
-      .insert(postsToInsert)
-      .select('id')
+    const data = await db
+      .insert(skoolPostLibrary)
+      .values(postsToInsert)
+      .returning({ id: skoolPostLibrary.id })
 
-    if (error) {
-      console.error('[External Posts API] Insert error:', error)
-      return NextResponse.json(
-        { error: 'Failed to create posts', details: error.message },
-        { status: 500 }
-      )
-    }
-
-    const postIds = data?.map((p) => p.id) || []
+    const postIds = data.map((p) => p.id)
 
     console.log(
       `[External Posts API] Created ${postIds.length} draft posts` +
@@ -145,34 +137,28 @@ export async function GET(request: NextRequest) {
   if (authError) return authError
 
   try {
-    const supabase = createServerClient()
     const { searchParams } = new URL(request.url)
     const status = searchParams.get('status') as PostLibraryStatus | null
     const limit = parseInt(searchParams.get('limit') || '50', 10)
 
-    let query = supabase
-      .from('skool_post_library')
-      .select('id, title, category, status, source, created_at, variation_group_id')
-      .order('created_at', { ascending: false })
-      .limit(Math.min(limit, 100)) // Cap at 100
-
-    if (status) {
-      query = query.eq('status', status)
-    }
-
-    const { data, error } = await query
-
-    if (error) {
-      console.error('[External Posts API] GET error:', error)
-      return NextResponse.json(
-        { error: 'Failed to fetch posts', details: error.message },
-        { status: 500 }
-      )
-    }
+    const data = await db
+      .select({
+        id: skoolPostLibrary.id,
+        title: skoolPostLibrary.title,
+        category: skoolPostLibrary.category,
+        status: skoolPostLibrary.status,
+        source: skoolPostLibrary.source,
+        createdAt: skoolPostLibrary.createdAt,
+        variationGroupId: skoolPostLibrary.variationGroupId,
+      })
+      .from(skoolPostLibrary)
+      .where(status ? eq(skoolPostLibrary.status, status) : undefined)
+      .orderBy(desc(skoolPostLibrary.createdAt))
+      .limit(Math.min(limit, 100))
 
     return NextResponse.json({
       posts: data,
-      count: data?.length || 0,
+      count: data.length,
     })
   } catch (error) {
     console.error('[External Posts API] GET exception:', error)

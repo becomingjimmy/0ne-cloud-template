@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { createServerClient } from '@0ne/db/server'
+import { db, eq, and, inArray } from '@0ne/db/server'
+import { conversationSyncStatus } from '@0ne/db/server'
 import { corsHeaders, validateExtensionAuth } from '@/lib/extension-auth'
 
 export { OPTIONS } from '@/lib/extension-auth'
@@ -90,32 +91,32 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    const supabase = createServerClient()
-
     // Fetch sync status for all requested conversations
-    const { data, error } = await supabase
-      .from('conversation_sync_status')
-      .select('*')
-      .eq('staff_skool_id', staffSkoolId)
-      .in('conversation_id', conversationIds)
-
-    if (error) {
-      console.error('[Extension API] Error fetching sync status:', error)
+    let data
+    try {
+      data = await db.select()
+        .from(conversationSyncStatus)
+        .where(and(
+          eq(conversationSyncStatus.staffSkoolId, staffSkoolId),
+          inArray(conversationSyncStatus.conversationId, conversationIds)
+        ))
+    } catch (dbError) {
+      console.error('[Extension API] Error fetching sync status:', dbError)
       return NextResponse.json(
-        { success: false, conversations: [], error: error.message },
+        { success: false, conversations: [], error: dbError instanceof Error ? dbError.message : 'Unknown error' },
         { status: 500, headers: corsHeaders }
       )
     }
 
     // Map database rows to response format
     const conversations: ConversationSyncState[] = (data || []).map((row) => ({
-      conversationId: row.conversation_id,
-      participantName: row.participant_name || undefined,
-      lastSyncedMessageId: row.last_synced_message_id,
-      lastSyncedMessageTime: row.last_synced_message_time,
-      backfillComplete: row.backfill_complete ?? false,
-      lastSyncTime: row.last_sync_time ? new Date(row.last_sync_time).getTime() : Date.now(),
-      totalMessagesSynced: row.total_messages_synced ?? 0,
+      conversationId: row.conversationId!,
+      participantName: row.participantName || undefined,
+      lastSyncedMessageId: row.lastSyncedMessageId,
+      lastSyncedMessageTime: row.lastSyncedMessageTime?.toISOString() ?? null,
+      backfillComplete: row.backfillComplete ?? false,
+      lastSyncTime: row.lastSyncTime ? new Date(row.lastSyncTime).getTime() : Date.now(),
+      totalMessagesSynced: row.totalMessagesSynced ?? 0,
     }))
 
     console.log(

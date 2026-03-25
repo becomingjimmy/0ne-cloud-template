@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { createServerClient } from '@0ne/db/server'
+import { db } from '@0ne/db/server'
+import { extensionCookies } from '@0ne/db/server'
 import {
   encryptCookies,
   isEncryptionConfigured,
@@ -91,29 +92,30 @@ export async function POST(request: NextRequest) {
     const expiresAt = body.authTokenExpiresAt ? new Date(body.authTokenExpiresAt) : null
 
     // Upsert into database
-    const supabase = createServerClient()
-
-    const { error } = await supabase.from('extension_cookies').upsert(
-      {
-        staff_skool_id: body.staffSkoolId,
-        cookies_encrypted: encryptedCookies,
-        auth_token_expires_at: expiresAt?.toISOString() ?? null,
-        session_cookie_present: body.hasSession,
-        last_updated: new Date().toISOString(),
-      },
-      {
-        onConflict: 'staff_skool_id',
-      }
-    )
-
-    if (error) {
-      console.error('[Extension API] Error storing cookies:', error)
+    try {
+      await db.insert(extensionCookies).values({
+        staffSkoolId: body.staffSkoolId,
+        cookiesEncrypted: encryptedCookies,
+        authTokenExpiresAt: expiresAt,
+        sessionCookiePresent: body.hasSession,
+        lastUpdated: new Date(),
+      }).onConflictDoUpdate({
+        target: extensionCookies.staffSkoolId,
+        set: {
+          cookiesEncrypted: encryptedCookies,
+          authTokenExpiresAt: expiresAt,
+          sessionCookiePresent: body.hasSession,
+          lastUpdated: new Date(),
+        },
+      })
+    } catch (dbError) {
+      console.error('[Extension API] Error storing cookies:', dbError)
       return NextResponse.json(
         {
           success: false,
           stored: false,
           expiresAt: null,
-          error: `Database error: ${error.message}`,
+          error: `Database error: ${dbError instanceof Error ? dbError.message : 'Unknown error'}`,
         } as PushCookiesResponse,
         { status: 500, headers: corsHeaders }
       )

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { createServerClient } from '@0ne/db/server'
+import { db, eq, and, desc, count as countFn } from '@0ne/db/server'
+import { skoolPostExecutionLog, skoolScheduledPosts, skoolPostLibrary } from '@0ne/db/server'
 
 export const dynamic = 'force-dynamic'
 
@@ -15,7 +16,6 @@ export const dynamic = 'force-dynamic'
  */
 export async function GET(request: NextRequest) {
   try {
-    const supabase = createServerClient()
     const { searchParams } = new URL(request.url)
 
     // Parse pagination params with defaults and limits
@@ -30,19 +30,9 @@ export async function GET(request: NextRequest) {
     const status = searchParams.get('status')
     const schedulerId = searchParams.get('scheduler_id')
 
-    // Build query with joins to get scheduler and post details
-    let query = supabase
-      .from('skool_post_execution_log')
-      .select(
-        `
-        *,
-        scheduler:skool_scheduled_posts(category, day_of_week, time),
-        post:skool_post_library(title)
-      `,
-        { count: 'exact' }
-      )
-
     // Apply filters
+    const conditions: ReturnType<typeof eq>[] = []
+
     if (status) {
       // Validate status value
       const validStatuses = ['success', 'failed', 'skipped']
@@ -52,29 +42,56 @@ export async function GET(request: NextRequest) {
           { status: 400 }
         )
       }
-      query = query.eq('status', status)
+      conditions.push(eq(skoolPostExecutionLog.status, status))
     }
 
     if (schedulerId) {
-      query = query.eq('scheduler_id', schedulerId)
+      conditions.push(eq(skoolPostExecutionLog.schedulerId, schedulerId))
     }
 
-    // Apply ordering and pagination
-    const { data, error, count } = await query
-      .order('executed_at', { ascending: false })
-      .range(offset, offset + limit - 1)
+    const whereClause = conditions.length > 0 ? and(...conditions) : undefined
 
-    if (error) {
-      console.error('[ExecutionLog API] GET error:', error)
-      return NextResponse.json({ error: error.message }, { status: 500 })
-    }
+    // Get total count for pagination
+    const [countResult] = await db
+      .select({ value: countFn() })
+      .from(skoolPostExecutionLog)
+      .where(whereClause)
+
+    const total = Number(countResult?.value ?? 0)
+
+    // Build query with joins to get scheduler and post details
+    const data = await db
+      .select({
+        log: skoolPostExecutionLog,
+        scheduler: {
+          category: skoolScheduledPosts.category,
+          dayOfWeek: skoolScheduledPosts.dayOfWeek,
+          time: skoolScheduledPosts.time,
+        },
+        post: {
+          title: skoolPostLibrary.title,
+        },
+      })
+      .from(skoolPostExecutionLog)
+      .leftJoin(skoolScheduledPosts, eq(skoolPostExecutionLog.schedulerId, skoolScheduledPosts.id))
+      .leftJoin(skoolPostLibrary, eq(skoolPostExecutionLog.postLibraryId, skoolPostLibrary.id))
+      .where(whereClause)
+      .orderBy(desc(skoolPostExecutionLog.executedAt))
+      .limit(limit)
+      .offset(offset)
+
+    const logs = data.map((row) => ({
+      ...row.log,
+      scheduler: row.scheduler?.category ? row.scheduler : null,
+      post: row.post?.title ? row.post : null,
+    }))
 
     return NextResponse.json({
-      logs: data,
-      total: count,
+      logs,
+      total,
       limit,
       offset,
-      hasMore: count !== null && offset + limit < count,
+      hasMore: offset + limit < total,
     })
   } catch (error) {
     console.error('[ExecutionLog API] GET exception:', error)
@@ -91,7 +108,6 @@ export async function GET(request: NextRequest) {
  */
 export async function POST(request: NextRequest) {
   try {
-    const supabase = createServerClient()
     const body = await request.json()
 
     // Validate required fields
@@ -111,25 +127,19 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    const { data, error } = await supabase
-      .from('skool_post_execution_log')
-      .insert({
-        scheduler_id: body.scheduler_id || null,
-        post_library_id: body.post_library_id || null,
+    const [inserted] = await db
+      .insert(skoolPostExecutionLog)
+      .values({
+        schedulerId: body.scheduler_id || null,
+        postLibraryId: body.post_library_id || null,
         status: body.status,
-        skool_post_id: body.skool_post_id || null,
-        skool_post_url: body.skool_post_url || null,
-        error_message: body.error_message || null,
+        skoolPostId: body.skool_post_id || null,
+        skoolPostUrl: body.skool_post_url || null,
+        errorMessage: body.error_message || null,
       })
-      .select()
-      .single()
+      .returning()
 
-    if (error) {
-      console.error('[ExecutionLog API] POST error:', error)
-      return NextResponse.json({ error: error.message }, { status: 500 })
-    }
-
-    return NextResponse.json({ log: data }, { status: 201 })
+    return NextResponse.json({ log: inserted }, { status: 201 })
   } catch (error) {
     console.error('[ExecutionLog API] POST exception:', error)
     return NextResponse.json(

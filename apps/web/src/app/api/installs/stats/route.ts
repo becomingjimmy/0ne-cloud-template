@@ -6,7 +6,8 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server'
-import { createServerClient } from '@0ne/db/server'
+import { db, eq, count } from '@0ne/db/server'
+import { telemetryEvents } from '@0ne/db/server'
 
 export const dynamic = 'force-dynamic'
 
@@ -42,42 +43,25 @@ export async function GET(request: NextRequest) {
   }
 
   try {
-    const supabase = createServerClient()
-
     // Run all aggregate queries in parallel
-    const [installsResult, doctorResult, allEventsResult] = await Promise.all([
+    const [installsCount, doctorCount, allEvents] = await Promise.all([
       // Count installs
-      supabase
-        .from('telemetry_events')
-        .select('*', { count: 'exact', head: true })
-        .eq('event_type', 'install'),
+      db.select({ count: count() }).from(telemetryEvents)
+        .where(eq(telemetryEvents.eventType, 'install')),
 
       // Count doctor runs
-      supabase
-        .from('telemetry_events')
-        .select('*', { count: 'exact', head: true })
-        .eq('event_type', 'doctor'),
+      db.select({ count: count() }).from(telemetryEvents)
+        .where(eq(telemetryEvents.eventType, 'doctor')),
 
       // Fetch all events with summary for success rate + avg issues calculation
-      supabase
-        .from('telemetry_events')
-        .select('summary'),
+      db.select({ summary: telemetryEvents.summary }).from(telemetryEvents),
     ])
 
-    if (installsResult.error || doctorResult.error || allEventsResult.error) {
-      const err = installsResult.error || doctorResult.error || allEventsResult.error
-      console.error('[Installs Stats API] Query error:', err)
-      return NextResponse.json(
-        { error: err!.message },
-        { status: 500, headers: corsHeaders }
-      )
-    }
-
-    const totalInstalls = installsResult.count || 0
-    const totalDoctorRuns = doctorResult.count || 0
+    const totalInstalls = installsCount[0]?.count ?? 0
+    const totalDoctorRuns = doctorCount[0]?.count ?? 0
 
     // Calculate success rate and average issues from summary data
-    const events = allEventsResult.data || []
+    const events = allEvents
     let successCount = 0
     let totalFails = 0
     let eventsWithSummary = 0

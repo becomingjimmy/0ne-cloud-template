@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { createServerClient } from '@0ne/db/server'
+import { db, eq, and, inArray, isNull } from '@0ne/db/server'
+import { skoolMembers, dmContactMappings } from '@0ne/db/server'
 import { corsHeaders, validateExtensionAuth } from '@/lib/extension-auth'
 import { GHLClient } from '@/features/kpi/lib/ghl-client'
 import { parseDisplayName } from '@/features/dm-sync/lib/contact-mapper'
@@ -124,7 +125,6 @@ export async function POST(request: NextRequest) {
       `[Extension API] Received ${members.length} members for group ${groupId}`
     )
 
-    const supabase = createServerClient()
     let upserted = 0
     const errors: string[] = []
 
@@ -148,48 +148,43 @@ export async function POST(request: NextRequest) {
         const effectivePhone = surveyPhone || null
 
         const memberRow: Record<string, unknown> = {
-          group_slug: groupId,
-          skool_user_id: member.skoolUserId,
-          display_name: member.name || null,
+          groupSlug: groupId,
+          skoolUserId: member.skoolUserId,
+          displayName: member.name || null,
           email: effectiveEmail,
-          profile_image: member.avatarUrl || null,
+          profileImage: member.avatarUrl || null,
           level: member.level ?? null,
           points: member.points ?? null,
-          member_since: member.joinedAt || null,
-          last_online: member.lastSeenAt || null,
+          memberSince: member.joinedAt ? new Date(member.joinedAt) : null,
+          lastOnline: member.lastSeenAt ? new Date(member.lastSeenAt) : null,
         }
 
         // Add additional fields if present (Phase 6)
-        if (member.username) memberRow.skool_username = member.username
+        if (member.username) memberRow.skoolUsername = member.username
         if (member.bio) memberRow.bio = member.bio
         if (member.location) memberRow.location = member.location
         if (member.role) memberRow.role = member.role
-        if (member.questionsAndAnswers) memberRow.survey_answers = member.questionsAndAnswers
+        if (member.questionsAndAnswers) memberRow.surveyAnswers = member.questionsAndAnswers
         if (effectivePhone) memberRow.phone = effectivePhone
 
-        const { error } = await supabase
-          .from('skool_members')
-          .upsert(memberRow, {
-            onConflict: 'skool_user_id',
+        await db.insert(skoolMembers).values(memberRow as typeof skoolMembers.$inferInsert)
+          .onConflictDoUpdate({
+            target: skoolMembers.skoolUserId,
+            set: memberRow as Record<string, unknown>,
           })
 
-        if (error) {
-          console.error(`[Extension API] Error upserting member ${member.skoolUserId}:`, error)
-          errors.push(`Member ${member.skoolUserId}: ${error.message}`)
-        } else {
-          upserted++
+        upserted++
 
-          // Queue for auto-matching if we have an email or phone
-          if (effectiveEmail || effectivePhone) {
-            needsMatching.push({
-              skoolUserId: member.skoolUserId,
-              email: effectiveEmail,
-              phone: effectivePhone,
-              displayName: member.name || '',
-              username: member.username || member.name || '',
-              surveyAnswers: member.questionsAndAnswers ?? null,
-            })
-          }
+        // Queue for auto-matching if we have an email or phone
+        if (effectiveEmail || effectivePhone) {
+          needsMatching.push({
+            skoolUserId: member.skoolUserId,
+            email: effectiveEmail,
+            phone: effectivePhone,
+            displayName: member.name || '',
+            username: member.username || member.name || '',
+            surveyAnswers: member.questionsAndAnswers ?? null,
+          })
         }
       } catch (memberError) {
         console.error(`[Extension API] Exception processing member ${member.skoolUserId}:`, memberError)
@@ -209,27 +204,22 @@ export async function POST(request: NextRequest) {
 
     if (needsMatching.length > 0) {
       const emailSyncIds = needsMatching.map((m) => m.skoolUserId)
-      const { data: existingMappings } = await supabase
-        .from('dm_contact_mappings')
-        .select('skool_user_id, email, phone')
-        .in('skool_user_id', emailSyncIds)
+      const existingMappings = await db.select({
+        skoolUserId: dmContactMappings.skoolUserId,
+        email: dmContactMappings.email,
+        phone: dmContactMappings.phone,
+      })
+        .from(dmContactMappings)
+        .where(inArray(dmContactMappings.skoolUserId, emailSyncIds))
 
-      if (existingMappings) {
-        for (const mapping of existingMappings) {
-          const memberInfo = needsMatching.find((m) => m.skoolUserId === mapping.skool_user_id)
-          if (!memberInfo) continue
+      for (const mapping of existingMappings) {
+        const memberInfo = needsMatching.find((m) => m.skoolUserId === mapping.skoolUserId)
+        if (!memberInfo) continue
 
-          const updates: Record<string, unknown> = {}
-          if (memberInfo.email && !mapping.email) {
-            updates.email = memberInfo.email
-          }
-          if (Object.keys(updates).length > 0) {
-            updates.updated_at = new Date().toISOString()
-            await supabase
-              .from('dm_contact_mappings')
-              .update(updates)
-              .eq('skool_user_id', mapping.skool_user_id)
-          }
+        if (memberInfo.email && !mapping.email) {
+          await db.update(dmContactMappings)
+            .set({ email: memberInfo.email, updatedAt: new Date() })
+            .where(eq(dmContactMappings.skoolUserId, mapping.skoolUserId!))
         }
       }
     }
@@ -245,13 +235,14 @@ export async function POST(request: NextRequest) {
     if (needsMatching.length > 0) {
       // Find which of these members are still unmatched
       const candidateIds = needsMatching.map((m) => m.skoolUserId)
-      const { data: unmatched } = await supabase
-        .from('skool_members')
-        .select('skool_user_id')
-        .in('skool_user_id', candidateIds)
-        .is('ghl_contact_id', null)
+      const unmatched = await db.select({ skoolUserId: skoolMembers.skoolUserId })
+        .from(skoolMembers)
+        .where(and(
+          inArray(skoolMembers.skoolUserId, candidateIds),
+          isNull(skoolMembers.ghlContactId)
+        ))
 
-      const unmatchedIds = new Set(unmatched?.map((m) => m.skool_user_id) || [])
+      const unmatchedIds = new Set(unmatched.map((m) => m.skoolUserId))
       const toMatch = needsMatching.filter((m) => unmatchedIds.has(m.skoolUserId))
 
       if (toMatch.length > 0) {
@@ -318,33 +309,36 @@ export async function POST(request: NextRequest) {
                 if (matchMethod !== 'auto_created') matched++
 
                 // Update skool_members with the match
-                await supabase
-                  .from('skool_members')
-                  .update({
-                    ghl_contact_id: contact.id,
-                    matched_at: new Date().toISOString(),
-                    match_method: matchMethod,
-                  })
-                  .eq('skool_user_id', member.skoolUserId)
+                await db.update(skoolMembers).set({
+                  ghlContactId: contact.id,
+                  matchedAt: new Date(),
+                  matchMethod,
+                }).where(eq(skoolMembers.skoolUserId, member.skoolUserId))
 
                 // Also upsert into dm_contact_mappings so it shows in the contacts UI
                 const clerkUserId = authResult.userId || authResult.skoolUserId || staffSkoolId
-                await supabase
-                  .from('dm_contact_mappings')
-                  .upsert({
-                    clerk_user_id: clerkUserId,
-                    skool_user_id: member.skoolUserId,
-                    skool_username: member.username,
-                    skool_display_name: member.displayName,
-                    ghl_contact_id: contact.id,
-                    match_method: matchMethod,
+                await db.insert(dmContactMappings).values({
+                  clerkUserId,
+                  skoolUserId: member.skoolUserId,
+                  skoolUsername: member.username,
+                  skoolDisplayName: member.displayName,
+                  ghlContactId: contact.id,
+                  matchMethod,
+                  email: member.email,
+                  contactType: 'community_member',
+                  updatedAt: new Date(),
+                }).onConflictDoUpdate({
+                  target: [dmContactMappings.clerkUserId, dmContactMappings.skoolUserId],
+                  set: {
+                    skoolUsername: member.username,
+                    skoolDisplayName: member.displayName,
+                    ghlContactId: contact.id,
+                    matchMethod,
                     email: member.email,
-                    contact_type: 'community_member',
-                    updated_at: new Date().toISOString(),
-                  }, {
-                    onConflict: 'clerk_user_id,skool_user_id',
-                    ignoreDuplicates: false,
-                  })
+                    contactType: 'community_member',
+                    updatedAt: new Date(),
+                  },
+                })
 
                 console.log(`[Extension API] ${matchMethod === 'auto_created' ? 'Created' : 'Matched'} ${member.email || member.phone} → GHL ${contact.id}`)
               }

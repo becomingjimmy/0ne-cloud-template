@@ -6,7 +6,8 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server'
-import { createServerClient } from '@0ne/db/server'
+import { db, eq } from '@0ne/db/server'
+import { skoolCategories } from '@0ne/db/server'
 import { corsHeaders, validateExtensionAuth } from '@/lib/extension-auth'
 
 export { OPTIONS } from '@/lib/extension-auth'
@@ -68,36 +69,30 @@ export async function POST(request: NextRequest) {
       `[Extension API] Received ${body.categories.length} categories for group "${body.groupSlug}"`
     )
 
-    const supabase = createServerClient()
-    const now = new Date().toISOString()
+    const now = new Date()
 
     // Delete existing categories for this group, then insert fresh
-    const { error: deleteError } = await supabase
-      .from('skool_categories')
-      .delete()
-      .eq('group_slug', body.groupSlug)
-
-    if (deleteError) {
+    try {
+      await db.delete(skoolCategories).where(eq(skoolCategories.groupSlug, body.groupSlug))
+    } catch (deleteError) {
       console.error('[Extension API] Failed to clear old categories:', deleteError)
     }
 
     // Insert new categories
     const rows = body.categories.map((c, index) => ({
-      group_slug: body.groupSlug,
-      skool_id: c.id,
+      groupSlug: body.groupSlug,
+      skoolId: c.id,
       name: c.name,
       position: c.position ?? index,
-      fetched_at: now,
+      fetchedAt: now,
     }))
 
-    const { error: insertError } = await supabase
-      .from('skool_categories')
-      .insert(rows)
-
-    if (insertError) {
+    try {
+      await db.insert(skoolCategories).values(rows)
+    } catch (insertError) {
       console.error('[Extension API] Failed to insert categories:', insertError)
       return NextResponse.json(
-        { success: false, count: 0, error: insertError.message } as PushCategoriesResponse,
+        { success: false, count: 0, error: insertError instanceof Error ? insertError.message : 'Unknown error' } as PushCategoriesResponse,
         { status: 500, headers: corsHeaders }
       )
     }

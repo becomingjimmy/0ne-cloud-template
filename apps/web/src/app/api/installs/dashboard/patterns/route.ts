@@ -7,7 +7,8 @@
 
 import { NextRequest, NextResponse } from 'next/server'
 import { auth } from '@clerk/nextjs/server'
-import { createServerClient } from '@0ne/db/server'
+import { db, eq, desc } from '@0ne/db/server'
+import { telemetryFailurePatterns } from '@0ne/db/server'
 
 export const dynamic = 'force-dynamic'
 
@@ -21,25 +22,13 @@ export async function GET(request: NextRequest) {
     const { searchParams } = request.nextUrl
     const category = searchParams.get('category')
 
-    const supabase = createServerClient()
+    const whereClause = category ? eq(telemetryFailurePatterns.category, category) : undefined
 
-    let query = supabase
-      .from('telemetry_failure_patterns')
-      .select('*')
+    const data = await db.select().from(telemetryFailurePatterns)
+      .where(whereClause)
+      .orderBy(desc(telemetryFailurePatterns.occurrenceCount))
 
-    if (category) {
-      query = query.eq('category', category)
-    }
-
-    const { data, error } = await query
-      .order('occurrence_count', { ascending: false })
-
-    if (error) {
-      console.error('[Installs Dashboard Patterns API] Query error:', error)
-      return NextResponse.json({ error: error.message }, { status: 500 })
-    }
-
-    return NextResponse.json({ data: data || [] })
+    return NextResponse.json({ data })
   } catch (error) {
     console.error('[Installs Dashboard Patterns API] Unexpected error:', error)
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 })

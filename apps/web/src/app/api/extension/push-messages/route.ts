@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { createServerClient } from '@0ne/db/server'
+import { db, eq, and, inArray, isNull } from '@0ne/db/server'
+import { dmMessages, staffUsers, dmContactMappings, skoolMembers } from '@0ne/db/server'
 import { corsHeaders, validateExtensionAuth } from '@/lib/extension-auth'
 
 export { OPTIONS } from '@/lib/extension-auth'
@@ -82,7 +83,6 @@ export async function POST(request: NextRequest) {
       `[Extension API] Received ${messages.length} messages for conversation ${conversationId} (staff: ${staffSkoolId})`
     )
 
-    const supabase = createServerClient()
     let synced = 0
     let skipped = 0
     const errors: string[] = []
@@ -92,24 +92,23 @@ export async function POST(request: NextRequest) {
     let clerkUserId: string | null = authResult.userId || null
     if (!clerkUserId) {
       // Look up from staff_users table using Skool ID
-      const { data: staffUser } = await supabase
-        .from('staff_users')
-        .select('clerk_user_id')
-        .eq('skool_user_id', staffSkoolId)
-        .single()
-      clerkUserId = staffUser?.clerk_user_id || null
+      const staffUserRows = await db.select({ clerkUserId: staffUsers.clerkUserId })
+        .from(staffUsers)
+        .where(eq(staffUsers.skoolUserId, staffSkoolId))
+      clerkUserId = staffUserRows[0]?.clerkUserId || null
     }
 
     // First, check which messages already exist to get accurate counts
     const messageIds = messages.map((m) => m.id)
-    const { data: existingMessages } = await supabase
-      .from('dm_messages')
-      .select('skool_message_id')
-      .eq('staff_skool_id', staffSkoolId)
-      .in('skool_message_id', messageIds)
+    const existingMessages = await db.select({ skoolMessageId: dmMessages.skoolMessageId })
+      .from(dmMessages)
+      .where(and(
+        eq(dmMessages.staffSkoolId, staffSkoolId),
+        inArray(dmMessages.skoolMessageId, messageIds)
+      ))
 
     const existingMessageIds = new Set(
-      (existingMessages || []).map((m) => m.skool_message_id)
+      existingMessages.map((m) => m.skoolMessageId)
     )
 
     // Process messages - only insert new ones
@@ -126,43 +125,35 @@ export async function POST(request: NextRequest) {
         // Extension-captured inbound messages need GHL sync → status='pending'
         // Extension-captured outbound messages are already sent in Skool → status='synced'
         const isOutbound = msg.isOwnMessage
-        const messageRow = {
-          clerk_user_id: clerkUserId,
-          skool_conversation_id: conversationId,
-          skool_message_id: msg.id,
-          skool_user_id: msg.senderId,
-          sender_name: msg.senderName || null, // Store sender name for contact matching
+
+        await db.insert(dmMessages).values({
+          clerkUserId,
+          skoolConversationId: conversationId,
+          skoolMessageId: msg.id,
+          skoolUserId: msg.senderId,
+          senderName: msg.senderName || null,
           direction: isOutbound ? 'outbound' : 'inbound',
-          message_text: msg.content,
-          status: isOutbound ? 'synced' : 'pending', // Outbound already sent; inbound needs GHL sync
-          synced_at: isOutbound ? new Date().toISOString() : null,
-          source: 'extension', // Extension-scraped, NOT from GHL/manual/hand-raiser
-          // Use original message timestamp, not insertion time
-          created_at: msg.timestamp || new Date().toISOString(),
-          // ghl_message_id will be null until synced to GHL
-          // Phase 5: Multi-staff attribution
-          staff_skool_id: isOutbound ? staffSkoolId : null,
-          staff_display_name: isOutbound ? (staffDisplayName || null) : null,
-        }
+          messageText: msg.content,
+          status: isOutbound ? 'synced' : 'pending',
+          syncedAt: isOutbound ? new Date() : null,
+          source: 'extension',
+          createdAt: msg.timestamp ? new Date(msg.timestamp) : new Date(),
+          staffSkoolId: isOutbound ? staffSkoolId : null,
+          staffDisplayName: isOutbound ? (staffDisplayName || null) : null,
+        })
 
-        const { error } = await supabase.from('dm_messages').insert(messageRow)
-
-        if (error) {
-          // Handle race condition - message was inserted between our check and insert
-          if (error.code === '23505') {
-            skipped++
-          } else {
-            console.error(`[Extension API] Error inserting message ${msg.id}:`, error)
-            errors.push(`Message ${msg.id}: ${error.message}`)
-          }
+        synced++
+      } catch (msgError: unknown) {
+        // Handle race condition - message was inserted between our check and insert
+        const errCode = (msgError as { code?: string })?.code
+        if (errCode === '23505') {
+          skipped++
         } else {
-          synced++
+          console.error(`[Extension API] Error inserting message ${msg.id}:`, msgError)
+          errors.push(
+            `Message ${msg.id}: ${msgError instanceof Error ? msgError.message : 'Unknown error'}`
+          )
         }
-      } catch (msgError) {
-        console.error(`[Extension API] Exception processing message ${msg.id}:`, msgError)
-        errors.push(
-          `Message ${msg.id}: ${msgError instanceof Error ? msgError.message : 'Unknown error'}`
-        )
       }
     }
 
@@ -182,40 +173,47 @@ export async function POST(request: NextRequest) {
         const senderIds = [...inboundSenders.keys()]
 
         // Filter out staff users
-        const { data: staffUsers } = await supabase
-          .from('staff_users')
-          .select('skool_user_id')
-          .in('skool_user_id', senderIds)
-        const staffSet = new Set((staffUsers || []).map(s => s.skool_user_id))
+        const staffUserRows = await db.select({ skoolUserId: staffUsers.skoolUserId })
+          .from(staffUsers)
+          .where(inArray(staffUsers.skoolUserId, senderIds))
+        const staffSet = new Set(staffUserRows.map(s => s.skoolUserId))
 
         // Check which already have mappings
-        const { data: existingMappings } = await supabase
-          .from('dm_contact_mappings')
-          .select('skool_user_id')
-          .eq('clerk_user_id', clerkUserId)
-          .in('skool_user_id', senderIds)
-        const mappedSet = new Set((existingMappings || []).map(m => m.skool_user_id))
+        const existingMappings = await db.select({ skoolUserId: dmContactMappings.skoolUserId })
+          .from(dmContactMappings)
+          .where(and(
+            eq(dmContactMappings.clerkUserId, clerkUserId),
+            inArray(dmContactMappings.skoolUserId, senderIds)
+          ))
+        const mappedSet = new Set(existingMappings.map(m => m.skoolUserId))
 
         // Create entries for unmapped, non-staff contacts
         for (const [senderId, senderName] of inboundSenders) {
           if (staffSet.has(senderId) || mappedSet.has(senderId)) continue
 
           // Check if community member
-          const { data: member } = await supabase
-            .from('skool_members')
-            .select('skool_user_id, display_name, email, ghl_contact_id')
-            .eq('skool_user_id', senderId)
-            .single()
+          const memberRows = await db.select({
+            skoolUserId: skoolMembers.skoolUserId,
+            displayName: skoolMembers.displayName,
+            email: skoolMembers.email,
+            ghlContactId: skoolMembers.ghlContactId,
+          })
+            .from(skoolMembers)
+            .where(eq(skoolMembers.skoolUserId, senderId))
+          const member = memberRows[0]
 
-          await supabase.from('dm_contact_mappings').upsert({
-            clerk_user_id: clerkUserId,
-            skool_user_id: senderId,
-            skool_display_name: member?.display_name || senderName || null,
-            ghl_contact_id: member?.ghl_contact_id || null,
-            match_method: member?.ghl_contact_id ? 'skool_members' : null,
-            contact_type: member ? 'community_member' : 'dm_contact',
+          await db.insert(dmContactMappings).values({
+            clerkUserId,
+            skoolUserId: senderId,
+            skoolDisplayName: member?.displayName || senderName || null,
+            ghlContactId: member?.ghlContactId || null,
+            matchMethod: member?.ghlContactId ? 'skool_members' : null,
+            contactType: member ? 'community_member' : 'dm_contact',
             email: member?.email || null,
-          }, { onConflict: 'clerk_user_id,skool_user_id', ignoreDuplicates: true })
+          }).onConflictDoUpdate({
+            target: [dmContactMappings.clerkUserId, dmContactMappings.skoolUserId],
+            set: {}, // ignoreDuplicates equivalent — no updates on conflict
+          })
         }
       }
     }

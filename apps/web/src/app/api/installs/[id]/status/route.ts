@@ -6,7 +6,8 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server'
-import { createServerClient } from '@0ne/db/server'
+import { db, eq } from '@0ne/db/server'
+import { telemetryEvents, telemetryStatusHistory } from '@0ne/db/server'
 
 export const dynamic = 'force-dynamic'
 
@@ -19,12 +20,6 @@ const corsHeaders = {
 const VALID_STATUSES = ['triaged', 'fixed', 'deployed'] as const
 type ValidStatus = (typeof VALID_STATUSES)[number]
 
-// Map status to its timestamp column
-const STATUS_TIMESTAMP_MAP: Record<ValidStatus, string> = {
-  triaged: 'triaged_at',
-  fixed: 'fixed_at',
-  deployed: 'deployed_at',
-}
 
 export async function OPTIONS() {
   return new NextResponse(null, { status: 200, headers: corsHeaders })
@@ -73,78 +68,65 @@ export async function PATCH(
       )
     }
 
-    const supabase = createServerClient()
-
     // Fetch current event to get old status
-    const { data: currentEvent, error: fetchError } = await supabase
-      .from('telemetry_events')
-      .select('status')
-      .eq('id', id)
-      .single()
+    const [currentEvent] = await db.select({ status: telemetryEvents.status })
+      .from(telemetryEvents)
+      .where(eq(telemetryEvents.id, id))
 
-    if (fetchError) {
-      if (fetchError.code === 'PGRST116') {
-        return NextResponse.json(
-          { error: 'Event not found' },
-          { status: 404, headers: corsHeaders }
-        )
-      }
-      console.error('[Installs Status API] Fetch error:', fetchError)
+    if (!currentEvent) {
       return NextResponse.json(
-        { error: fetchError.message },
-        { status: 500, headers: corsHeaders }
+        { error: 'Event not found' },
+        { status: 404, headers: corsHeaders }
       )
     }
 
     const oldStatus = currentEvent.status || 'new'
 
-    // Build update payload
-    const timestampCol = STATUS_TIMESTAMP_MAP[status as ValidStatus]
+    // Build update payload — map snake_case timestamp columns to camelCase schema
+    const TIMESTAMP_CAMEL_MAP: Record<ValidStatus, string> = {
+      triaged: 'triagedAt',
+      fixed: 'fixedAt',
+      deployed: 'deployedAt',
+    }
+    const timestampKey = TIMESTAMP_CAMEL_MAP[status as ValidStatus]
     const updatePayload: Record<string, unknown> = {
       status,
-      [timestampCol]: new Date().toISOString(),
+      [timestampKey]: new Date(),
     }
 
     if (fix_commit !== undefined) {
-      updatePayload.fix_commit = fix_commit
+      updatePayload.fixCommit = fix_commit
     }
     if (fix_notes !== undefined) {
-      updatePayload.fix_notes = fix_notes
+      updatePayload.fixNotes = fix_notes
     }
 
     // Update event and insert history in parallel
-    const [updateResult, historyResult] = await Promise.all([
-      supabase
-        .from('telemetry_events')
-        .update(updatePayload)
-        .eq('id', id)
-        .select()
-        .single(),
+    const [updateResult, _historyResult] = await Promise.all([
+      db.update(telemetryEvents)
+        .set(updatePayload)
+        .where(eq(telemetryEvents.id, id))
+        .returning(),
 
-      supabase
-        .from('telemetry_status_history')
-        .insert({
-          event_id: id,
-          old_status: oldStatus,
-          new_status: status,
-          note: note || null,
-        }),
+      db.insert(telemetryStatusHistory).values({
+        eventId: id,
+        oldStatus: oldStatus,
+        newStatus: status,
+        note: note || null,
+      }).catch((err) => {
+        console.error('[Installs Status API] History insert error (non-fatal):', err)
+      }),
     ])
 
-    if (updateResult.error) {
-      console.error('[Installs Status API] Update error:', updateResult.error)
+    if (!updateResult || updateResult.length === 0) {
       return NextResponse.json(
-        { error: updateResult.error.message },
+        { error: 'Failed to update event' },
         { status: 500, headers: corsHeaders }
       )
     }
 
-    if (historyResult.error) {
-      console.error('[Installs Status API] History insert error (non-fatal):', historyResult.error)
-    }
-
     return NextResponse.json(
-      { success: true, event: updateResult.data },
+      { success: true, event: updateResult[0] },
       { headers: corsHeaders }
     )
   } catch (error) {

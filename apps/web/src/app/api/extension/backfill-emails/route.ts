@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { createServerClient } from '@0ne/db/server'
+import { db, eq, and, or, isNull, isNotNull, inArray, count } from '@0ne/db/server'
+import { skoolMembers, dmContactMappings, dmMessages, contactChannels } from '@0ne/db/server'
 import { corsHeaders, validateExtensionAuth } from '@/lib/extension-auth'
 import { GHLClient } from '@/features/kpi/lib/ghl-client'
 import { parseDisplayName } from '@/features/dm-sync/lib/contact-mapper'
@@ -58,37 +59,6 @@ function normalizeSurveyAnswers(raw: unknown): unknown[] | null {
   return null
 }
 
-/** Paginated fetch — gets ALL rows matching a query */
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-async function fetchAllRows<T>(
-  supabase: ReturnType<typeof createServerClient>,
-  table: string,
-  select: string,
-  filters?: (query: any) => any
-): Promise<T[]> {
-  const PAGE_SIZE = 1000
-  const allRows: T[] = []
-  let offset = 0
-  let hasMore = true
-
-  while (hasMore) {
-    let query = supabase.from(table).select(select).range(offset, offset + PAGE_SIZE - 1)
-    if (filters) {
-      query = filters(query) as typeof query
-    }
-    const { data, error } = await query
-    if (error) throw error
-    if (!data || data.length === 0) {
-      hasMore = false
-    } else {
-      allRows.push(...(data as T[]))
-      offset += data.length
-      if (data.length < PAGE_SIZE) hasMore = false
-    }
-  }
-  return allRows
-}
-
 export async function POST(request: NextRequest) {
   const authResult = await validateExtensionAuth(request)
   if (!authResult.valid) {
@@ -96,7 +66,6 @@ export async function POST(request: NextRequest) {
   }
 
   try {
-    const supabase = createServerClient()
     const stats = {
       members_scanned: 0,
       emails_extracted: 0,
@@ -114,23 +83,22 @@ export async function POST(request: NextRequest) {
 
     // =========================================================================
     // Step 1: Extract emails/phones from survey_answers in skool_members
-    // Paginated — processes ALL members, not just the first 1000
     // =========================================================================
 
-    const membersWithSurvey = await fetchAllRows<{
-      skool_user_id: string
-      survey_answers: unknown
-      email: string | null
-      phone: string | null
-    }>(supabase, 'skool_members', 'skool_user_id, survey_answers, email, phone', (q) =>
-      q.not('survey_answers', 'is', null)
-    )
+    const membersWithSurvey = await db.select({
+      skoolUserId: skoolMembers.skoolUserId,
+      surveyAnswers: skoolMembers.surveyAnswers,
+      email: skoolMembers.email,
+      phone: skoolMembers.phone,
+    })
+      .from(skoolMembers)
+      .where(isNotNull(skoolMembers.surveyAnswers))
 
     console.log(`[Backfill] Found ${membersWithSurvey.length} members with survey answers`)
     stats.members_scanned = membersWithSurvey.length
 
     for (const member of membersWithSurvey) {
-      const survey = normalizeSurveyAnswers(member.survey_answers)
+      const survey = normalizeSurveyAnswers(member.surveyAnswers)
       const surveyEmail = extractEmailFromSurvey(survey)
       const surveyPhone = extractPhoneFromSurvey(survey)
       const updates: Record<string, unknown> = {}
@@ -145,10 +113,9 @@ export async function POST(request: NextRequest) {
       }
 
       if (Object.keys(updates).length > 0) {
-        await supabase
-          .from('skool_members')
-          .update(updates)
-          .eq('skool_user_id', member.skool_user_id)
+        await db.update(skoolMembers)
+          .set(updates)
+          .where(eq(skoolMembers.skoolUserId, member.skoolUserId))
       }
     }
 
@@ -156,43 +123,41 @@ export async function POST(request: NextRequest) {
 
     // =========================================================================
     // Step 2: Sync data from skool_members → dm_contact_mappings
-    // (emails, phones, usernames, display names)
     // =========================================================================
 
-    const membersWithData = await fetchAllRows<{
-      skool_user_id: string
-      email: string | null
-      phone: string | null
-      skool_username: string | null
-      display_name: string | null
-    }>(supabase, 'skool_members', 'skool_user_id, email, phone, skool_username, display_name')
+    const membersWithData = await db.select({
+      skoolUserId: skoolMembers.skoolUserId,
+      email: skoolMembers.email,
+      phone: skoolMembers.phone,
+      skoolUsername: skoolMembers.skoolUsername,
+      displayName: skoolMembers.displayName,
+    }).from(skoolMembers)
 
-    const allMappings = await fetchAllRows<{
-      skool_user_id: string
-      email: string | null
-      phone: string | null
-      skool_username: string | null
-      skool_display_name: string | null
-    }>(supabase, 'dm_contact_mappings', 'skool_user_id, email, phone, skool_username, skool_display_name')
+    const allMappings = await db.select({
+      skoolUserId: dmContactMappings.skoolUserId,
+      email: dmContactMappings.email,
+      phone: dmContactMappings.phone,
+      skoolUsername: dmContactMappings.skoolUsername,
+      skoolDisplayName: dmContactMappings.skoolDisplayName,
+    }).from(dmContactMappings)
 
-    const mappingMap = new Map(allMappings.map((m) => [m.skool_user_id, m]))
+    const mappingMap = new Map(allMappings.map((m) => [m.skoolUserId, m]))
 
     for (const member of membersWithData) {
-      const mapping = mappingMap.get(member.skool_user_id)
+      const mapping = mappingMap.get(member.skoolUserId)
       if (!mapping) continue
 
       const updates: Record<string, unknown> = {}
       if (member.email && !mapping.email) updates.email = member.email
       if (member.phone && !mapping.phone) updates.phone = member.phone
-      if (member.skool_username && !mapping.skool_username) updates.skool_username = member.skool_username
-      if (member.display_name && !mapping.skool_display_name) updates.skool_display_name = member.display_name
+      if (member.skoolUsername && !mapping.skoolUsername) updates.skoolUsername = member.skoolUsername
+      if (member.displayName && !mapping.skoolDisplayName) updates.skoolDisplayName = member.displayName
 
       if (Object.keys(updates).length > 0) {
-        updates.updated_at = new Date().toISOString()
-        await supabase
-          .from('dm_contact_mappings')
-          .update(updates)
-          .eq('skool_user_id', member.skool_user_id)
+        updates.updatedAt = new Date()
+        await db.update(dmContactMappings)
+          .set(updates)
+          .where(eq(dmContactMappings.skoolUserId, member.skoolUserId))
         stats.mappings_updated++
       }
     }
@@ -201,47 +166,40 @@ export async function POST(request: NextRequest) {
 
     // =========================================================================
     // Step 2b: Clean up garbage display names in dm_contact_mappings
-    // Garbage = contains URLs, commas, is >50 chars, or looks like bio text
-    // Replace with username-derived name or skool_members display_name
     // =========================================================================
 
-    const allMappingsForCleanup = await fetchAllRows<{
-      skool_user_id: string
-      skool_display_name: string | null
-      skool_username: string | null
-    }>(supabase, 'dm_contact_mappings', 'skool_user_id, skool_display_name, skool_username')
+    const allMappingsForCleanup = await db.select({
+      skoolUserId: dmContactMappings.skoolUserId,
+      skoolDisplayName: dmContactMappings.skoolDisplayName,
+      skoolUsername: dmContactMappings.skoolUsername,
+    }).from(dmContactMappings)
 
     for (const mapping of allMappingsForCleanup) {
-      const name = mapping.skool_display_name
+      const name = mapping.skoolDisplayName
       if (!name) continue
 
-      // Detect garbage: URLs, very long, commas, or contains "http"
       const isGarbage = name.length > 50 ||
         name.includes('http') ||
         name.includes(',') ||
         name.includes('assets.skool.com')
 
       if (isGarbage) {
-        // Try to get a clean name from skool_members
-        const { data: member } = await supabase
-          .from('skool_members')
-          .select('display_name, skool_username')
-          .eq('skool_user_id', mapping.skool_user_id)
-          .single()
+        const memberRows = await db.select({
+          displayName: skoolMembers.displayName,
+          skoolUsername: skoolMembers.skoolUsername,
+        })
+          .from(skoolMembers)
+          .where(eq(skoolMembers.skoolUserId, mapping.skoolUserId!))
+        const member = memberRows[0]
 
-        // Use member display_name if it's clean, otherwise fall back to username
-        let cleanName = mapping.skool_username || null
-        if (member?.display_name && member.display_name.length <= 50 && !member.display_name.includes('http')) {
-          cleanName = member.display_name
+        let cleanName = mapping.skoolUsername || null
+        if (member?.displayName && member.displayName.length <= 50 && !member.displayName.includes('http')) {
+          cleanName = member.displayName
         }
 
-        await supabase
-          .from('dm_contact_mappings')
-          .update({
-            skool_display_name: cleanName,
-            updated_at: new Date().toISOString(),
-          })
-          .eq('skool_user_id', mapping.skool_user_id)
+        await db.update(dmContactMappings)
+          .set({ skoolDisplayName: cleanName, updatedAt: new Date() })
+          .where(eq(dmContactMappings.skoolUserId, mapping.skoolUserId!))
         stats.names_cleaned++
       }
     }
@@ -249,13 +207,11 @@ export async function POST(request: NextRequest) {
     console.log(`[Backfill] Cleaned ${stats.names_cleaned} garbage display names`)
 
     // =========================================================================
-    // Step 2c: Clean up garbage skool_username values in dm_contact_mappings
-    // Garbage = contains URLs, commas, is >50 chars
-    // Set to null (no good fallback for username — it should be a slug)
+    // Step 2c: Clean up garbage skool_username values
     // =========================================================================
 
     for (const mapping of allMappingsForCleanup) {
-      const username = mapping.skool_username
+      const username = mapping.skoolUsername
       if (!username) continue
 
       const isGarbageUsername = username.length > 50 ||
@@ -264,13 +220,9 @@ export async function POST(request: NextRequest) {
         username.includes('assets.skool.com')
 
       if (isGarbageUsername) {
-        await supabase
-          .from('dm_contact_mappings')
-          .update({
-            skool_username: null,
-            updated_at: new Date().toISOString(),
-          })
-          .eq('skool_user_id', mapping.skool_user_id)
+        await db.update(dmContactMappings)
+          .set({ skoolUsername: null, updatedAt: new Date() })
+          .where(eq(dmContactMappings.skoolUserId, mapping.skoolUserId!))
         stats.usernames_cleaned++
       }
     }
@@ -279,53 +231,37 @@ export async function POST(request: NextRequest) {
 
     // =========================================================================
     // Step 2d: Delete entries with invalid skool_user_id format
-    //
-    // A real Skool user ID is either:
-    //   - A slug: lowercase letters, digits, hyphens only (e.g. "keith-sacco-6948")
-    //   - A numeric ID: digits only (e.g. "47217995")
-    //
-    // Anything with spaces, uppercase, emojis, commas, periods, apostrophes,
-    // or other special chars is garbage from bad scraping.
-    //
-    // Clean up from: dm_contact_mappings, dm_messages, contact_channels,
-    // and skool_members.
     // =========================================================================
 
-    // Valid Skool user ID = lowercase slug with hyphens or a numeric ID (6+ digits)
-    // Rejects: short numbers like "2025", single chars, anything with spaces/special chars
     const VALID_SKOOL_ID = /^[a-z0-9]([a-z0-9-]*[a-z0-9])?$/
     const isValidSkoolId = (id: string): boolean => {
       if (id.length < 3) return false
       if (!VALID_SKOOL_ID.test(id)) return false
-      // Pure numeric IDs must be 6+ digits (real Skool numeric IDs are 7-8+)
       if (/^\d+$/.test(id) && id.length < 6) return false
       return true
     }
 
-    // Check dm_contact_mappings
-    const allMappingsForValidation = await fetchAllRows<{
-      id: string
-      skool_user_id: string
-    }>(supabase, 'dm_contact_mappings', 'id, skool_user_id')
+    const allMappingsForValidation = await db.select({
+      id: dmContactMappings.id,
+      skoolUserId: dmContactMappings.skoolUserId,
+    }).from(dmContactMappings)
 
     const invalidMappings = allMappingsForValidation.filter(
-      (m) => !isValidSkoolId(m.skool_user_id)
+      (m) => !isValidSkoolId(m.skoolUserId!)
     )
 
-    // Check skool_members
-    const allMembersForValidation = await fetchAllRows<{
-      skool_user_id: string
-    }>(supabase, 'skool_members', 'skool_user_id')
+    const allMembersForValidation = await db.select({
+      skoolUserId: skoolMembers.skoolUserId,
+    }).from(skoolMembers)
 
     const invalidMembers = allMembersForValidation.filter(
-      (m) => !isValidSkoolId(m.skool_user_id)
+      (m) => !isValidSkoolId(m.skoolUserId)
     )
 
-    // Combine all invalid user IDs for cascade delete
     const allInvalidUserIds = [
       ...new Set([
-        ...invalidMappings.map((m) => m.skool_user_id),
-        ...invalidMembers.map((m) => m.skool_user_id),
+        ...invalidMappings.map((m) => m.skoolUserId!),
+        ...invalidMembers.map((m) => m.skoolUserId),
       ]),
     ]
     const invalidMappingIds = invalidMappings.map((m) => m.id)
@@ -333,28 +269,24 @@ export async function POST(request: NextRequest) {
     if (allInvalidUserIds.length > 0) {
       console.log(`[Backfill] Found ${invalidMappings.length} invalid mappings + ${invalidMembers.length} invalid members, deleting...`)
 
-      // Delete dm_messages with invalid user IDs
       for (let i = 0; i < allInvalidUserIds.length; i += 50) {
         const batch = allInvalidUserIds.slice(i, i + 50)
-        await supabase.from('dm_messages').delete().in('skool_user_id', batch)
+        await db.delete(dmMessages).where(inArray(dmMessages.skoolUserId, batch))
       }
 
-      // Delete contact_channels with invalid user IDs
       for (let i = 0; i < allInvalidUserIds.length; i += 50) {
         const batch = allInvalidUserIds.slice(i, i + 50)
-        await supabase.from('contact_channels').delete().in('skool_user_id', batch)
+        await db.delete(contactChannels).where(inArray(contactChannels.skoolUserId, batch))
       }
 
-      // Delete invalid dm_contact_mappings
       for (let i = 0; i < invalidMappingIds.length; i += 100) {
         const batch = invalidMappingIds.slice(i, i + 100)
-        await supabase.from('dm_contact_mappings').delete().in('id', batch)
+        await db.delete(dmContactMappings).where(inArray(dmContactMappings.id, batch))
       }
 
-      // Delete invalid skool_members
       for (let i = 0; i < invalidMembers.length; i += 50) {
-        const batch = invalidMembers.slice(i, i + 50).map((m) => m.skool_user_id)
-        await supabase.from('skool_members').delete().in('skool_user_id', batch)
+        const batch = invalidMembers.slice(i, i + 50).map((m) => m.skoolUserId)
+        await db.delete(skoolMembers).where(inArray(skoolMembers.skoolUserId, batch))
       }
 
       stats.junk_deleted = invalidMappings.length + invalidMembers.length
@@ -363,55 +295,43 @@ export async function POST(request: NextRequest) {
 
     // =========================================================================
     // Step 2e: Enrich contacts missing username/display_name
-    //
-    // For DM contacts, skool_user_id IS often the user's slug (e.g. "keith-sacco-6948").
-    // If skool_username is null but skool_user_id contains a hyphen (slug format),
-    // derive username and display name from it.
-    // Also delete truly unresolvable contacts (no username derivable, no messages,
-    // no email, no phone, no GHL match).
     // =========================================================================
 
-    const mappingsNeedingEnrichment = await fetchAllRows<{
-      id: string
-      skool_user_id: string
-      skool_username: string | null
-      skool_display_name: string | null
-      email: string | null
-      phone: string | null
-      ghl_contact_id: string | null
-    }>(supabase, 'dm_contact_mappings', 'id, skool_user_id, skool_username, skool_display_name, email, phone, ghl_contact_id', (q) =>
-      q.is('skool_username', null)
-    )
+    const mappingsNeedingEnrichment = await db.select({
+      id: dmContactMappings.id,
+      skoolUserId: dmContactMappings.skoolUserId,
+      skoolUsername: dmContactMappings.skoolUsername,
+      skoolDisplayName: dmContactMappings.skoolDisplayName,
+      email: dmContactMappings.email,
+      phone: dmContactMappings.phone,
+      ghlContactId: dmContactMappings.ghlContactId,
+    })
+      .from(dmContactMappings)
+      .where(isNull(dmContactMappings.skoolUsername))
 
     for (const mapping of mappingsNeedingEnrichment) {
-      const uid = mapping.skool_user_id
+      const uid = mapping.skoolUserId!
 
-      // If the skool_user_id looks like a slug (contains hyphen), use it as username
       if (uid.includes('-') && isValidSkoolId(uid)) {
-        // Derive display name: "keith-sacco-6948" → "Keith Sacco"
         const parts = uid.replace(/-\d+$/, '').split('-')
         const displayName = parts.map((w) => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase()).join(' ')
 
-        await supabase
-          .from('dm_contact_mappings')
-          .update({
-            skool_username: uid,
-            skool_display_name: mapping.skool_display_name || displayName,
-            updated_at: new Date().toISOString(),
+        await db.update(dmContactMappings)
+          .set({
+            skoolUsername: uid,
+            skoolDisplayName: mapping.skoolDisplayName || displayName,
+            updatedAt: new Date(),
           })
-          .eq('id', mapping.id)
+          .where(eq(dmContactMappings.id, mapping.id))
         stats.slug_enriched++
-      } else if (!mapping.email && !mapping.phone && !mapping.ghl_contact_id) {
-        // No slug, no contact info, no GHL match — check if they have any messages
-        const { count: msgCount } = await supabase
-          .from('dm_messages')
-          .select('*', { count: 'exact', head: true })
-          .eq('skool_user_id', uid)
+      } else if (!mapping.email && !mapping.phone && !mapping.ghlContactId) {
+        const msgCountRows = await db.select({ value: count() })
+          .from(dmMessages)
+          .where(eq(dmMessages.skoolUserId, uid))
 
-        if (!msgCount || msgCount === 0) {
-          // Truly unresolvable: no slug, no data, no messages — delete
-          await supabase.from('contact_channels').delete().eq('skool_user_id', uid)
-          await supabase.from('dm_contact_mappings').delete().eq('id', mapping.id)
+        if (!msgCountRows[0]?.value || msgCountRows[0].value === 0) {
+          await db.delete(contactChannels).where(eq(contactChannels.skoolUserId, uid))
+          await db.delete(dmContactMappings).where(eq(dmContactMappings.id, mapping.id))
           stats.unresolvable_deleted++
         }
       }
@@ -421,19 +341,21 @@ export async function POST(request: NextRequest) {
 
     // =========================================================================
     // Step 3: Auto-match unmatched members against GHL
-    // Cascade: search email → search phone → create contact
     // =========================================================================
 
-    const unmatchedWithContact = await fetchAllRows<{
-      skool_user_id: string
-      email: string | null
-      phone: string | null
-      display_name: string | null
-      skool_username: string | null
-      survey_answers: unknown
-    }>(supabase, 'skool_members', 'skool_user_id, email, phone, display_name, skool_username, survey_answers', (q) =>
-      q.is('ghl_contact_id', null).or('email.not.is.null,phone.not.is.null')
-    )
+    const unmatchedWithContact = await db.select({
+      skoolUserId: skoolMembers.skoolUserId,
+      email: skoolMembers.email,
+      phone: skoolMembers.phone,
+      displayName: skoolMembers.displayName,
+      skoolUsername: skoolMembers.skoolUsername,
+      surveyAnswers: skoolMembers.surveyAnswers,
+    })
+      .from(skoolMembers)
+      .where(and(
+        isNull(skoolMembers.ghlContactId),
+        or(isNotNull(skoolMembers.email), isNotNull(skoolMembers.phone))
+      ))
 
     if (unmatchedWithContact.length > 0) {
       console.log(`[Backfill] Auto-matching ${unmatchedWithContact.length} unmatched members (email/phone)...`)
@@ -447,27 +369,23 @@ export async function POST(request: NextRequest) {
             let contact = null
             let matchMethod = ''
 
-            // 1. Search by email
             if (member.email) {
               contact = await ghl.searchContactByEmail(member.email)
               if (contact) matchMethod = 'email'
               await new Promise((r) => setTimeout(r, 200))
             }
 
-            // 2. Search by phone
             if (!contact && member.phone) {
               contact = await ghl.searchContactByPhone(member.phone)
               if (contact) matchMethod = 'phone'
               await new Promise((r) => setTimeout(r, 200))
             }
 
-            // 3. Create if not found
             if (!contact && (member.email || member.phone)) {
-              const { firstName, lastName } = parseDisplayName(member.display_name || 'Unknown')
+              const { firstName, lastName } = parseDisplayName(member.displayName || 'Unknown')
 
-              // Build survey answer custom fields
               const customFields: Array<{ key: string; field_value: string }> = []
-              const survey = normalizeSurveyAnswers(member.survey_answers)
+              const survey = normalizeSurveyAnswers(member.surveyAnswers)
               if (survey) {
                 const fieldKeys = ['contact.skool_answer_1', 'contact.skool_answer_2', 'contact.skool_answer_3']
                 for (let i = 0; i < Math.min(survey.length, 3); i++) {
@@ -500,24 +418,18 @@ export async function POST(request: NextRequest) {
               if (matchMethod === 'email') stats.ghl_matched++
               if (matchMethod === 'phone') stats.ghl_phone_matched++
 
-              await supabase
-                .from('skool_members')
-                .update({
-                  ghl_contact_id: contact.id,
-                  matched_at: new Date().toISOString(),
-                  match_method: matchMethod,
-                })
-                .eq('skool_user_id', member.skool_user_id)
+              await db.update(skoolMembers).set({
+                ghlContactId: contact.id,
+                matchedAt: new Date(),
+                matchMethod,
+              }).where(eq(skoolMembers.skoolUserId, member.skoolUserId))
 
-              await supabase
-                .from('dm_contact_mappings')
-                .update({
-                  ghl_contact_id: contact.id,
-                  match_method: matchMethod,
-                  email: member.email,
-                  updated_at: new Date().toISOString(),
-                })
-                .eq('skool_user_id', member.skool_user_id)
+              await db.update(dmContactMappings).set({
+                ghlContactId: contact.id,
+                matchMethod,
+                email: member.email,
+                updatedAt: new Date(),
+              }).where(eq(dmContactMappings.skoolUserId, member.skoolUserId))
             }
           } catch (matchError) {
             console.error(`[Backfill] Match error for ${member.email || member.phone}:`, matchError)

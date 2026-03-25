@@ -6,7 +6,8 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server'
-import { createServerClient } from '@0ne/db/server'
+import { db, eq, desc } from '@0ne/db/server'
+import { telemetryFailurePatterns } from '@0ne/db/server'
 
 export const dynamic = 'force-dynamic'
 
@@ -45,29 +46,14 @@ export async function GET(request: NextRequest) {
     const { searchParams } = request.nextUrl
     const category = searchParams.get('category')
 
-    const supabase = createServerClient()
+    const whereClause = category ? eq(telemetryFailurePatterns.category, category) : undefined
 
-    let query = supabase
-      .from('telemetry_failure_patterns')
-      .select('*')
-
-    if (category) {
-      query = query.eq('category', category)
-    }
-
-    const { data, error } = await query
-      .order('occurrence_count', { ascending: false })
-
-    if (error) {
-      console.error('[Installs Patterns API] Query error:', error)
-      return NextResponse.json(
-        { error: error.message },
-        { status: 500, headers: corsHeaders }
-      )
-    }
+    const data = await db.select().from(telemetryFailurePatterns)
+      .where(whereClause)
+      .orderBy(desc(telemetryFailurePatterns.occurrenceCount))
 
     return NextResponse.json(
-      { data: data || [] },
+      { data },
       { headers: corsHeaders }
     )
   } catch (error) {

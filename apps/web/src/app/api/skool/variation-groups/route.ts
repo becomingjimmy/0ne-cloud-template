@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { createServerClient } from '@0ne/db/server'
+import { db, eq, and, asc, inArray } from '@0ne/db/server'
+import { skoolVariationGroups, skoolPostLibrary, skoolScheduledPosts } from '@0ne/db/server'
 import type { SkoolVariationGroupInput } from '@0ne/db'
 
 export const dynamic = 'force-dynamic'
@@ -10,54 +11,52 @@ export const dynamic = 'force-dynamic'
  */
 export async function GET(request: NextRequest) {
   try {
-    const supabase = createServerClient()
     const { searchParams } = new URL(request.url)
     const includeStats = searchParams.get('include_stats') === 'true'
 
-    const { data, error } = await supabase
-      .from('skool_variation_groups')
-      .select('*')
-      .order('name')
-
-    if (error) {
-      console.error('[Variation Groups API] GET error:', error)
-      return NextResponse.json({ error: error.message }, { status: 500 })
-    }
+    const data = await db
+      .select()
+      .from(skoolVariationGroups)
+      .orderBy(asc(skoolVariationGroups.name))
 
     // Optionally include post counts for each group
-    let groupsWithStats = data
-    if (includeStats && data) {
+    let groupsWithStats: unknown[] = data
+    if (includeStats && data.length > 0) {
       const groupIds = data.map((g) => g.id)
 
       // Get post counts
-      const { data: postCounts } = await supabase
-        .from('skool_post_library')
-        .select('variation_group_id')
-        .in('variation_group_id', groupIds)
-        .eq('is_active', true)
+      const postCounts = await db
+        .select({ variationGroupId: skoolPostLibrary.variationGroupId })
+        .from(skoolPostLibrary)
+        .where(and(
+          inArray(skoolPostLibrary.variationGroupId, groupIds),
+          eq(skoolPostLibrary.isActive, true)
+        ))
 
       // Get scheduler counts
-      const { data: schedulerCounts } = await supabase
-        .from('skool_scheduled_posts')
-        .select('variation_group_id')
-        .in('variation_group_id', groupIds)
-        .eq('is_active', true)
+      const schedulerCounts = await db
+        .select({ variationGroupId: skoolScheduledPosts.variationGroupId })
+        .from(skoolScheduledPosts)
+        .where(and(
+          inArray(skoolScheduledPosts.variationGroupId, groupIds),
+          eq(skoolScheduledPosts.isActive, true)
+        ))
 
       // Aggregate counts
       const postCountMap = new Map<string, number>()
       const schedulerCountMap = new Map<string, number>()
 
-      postCounts?.forEach((p) => {
-        if (p.variation_group_id) {
-          postCountMap.set(p.variation_group_id, (postCountMap.get(p.variation_group_id) || 0) + 1)
+      postCounts.forEach((p) => {
+        if (p.variationGroupId) {
+          postCountMap.set(p.variationGroupId, (postCountMap.get(p.variationGroupId) || 0) + 1)
         }
       })
 
-      schedulerCounts?.forEach((s) => {
-        if (s.variation_group_id) {
+      schedulerCounts.forEach((s) => {
+        if (s.variationGroupId) {
           schedulerCountMap.set(
-            s.variation_group_id,
-            (schedulerCountMap.get(s.variation_group_id) || 0) + 1
+            s.variationGroupId,
+            (schedulerCountMap.get(s.variationGroupId) || 0) + 1
           )
         }
       })
@@ -85,7 +84,6 @@ export async function GET(request: NextRequest) {
  */
 export async function POST(request: NextRequest) {
   try {
-    const supabase = createServerClient()
     const body: SkoolVariationGroupInput = await request.json()
 
     // Validate required fields
@@ -93,22 +91,16 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Missing required field: name' }, { status: 400 })
     }
 
-    const { data, error } = await supabase
-      .from('skool_variation_groups')
-      .insert({
+    const [inserted] = await db
+      .insert(skoolVariationGroups)
+      .values({
         name: body.name,
         description: body.description || null,
-        is_active: body.is_active ?? true,
+        isActive: body.is_active ?? true,
       })
-      .select()
-      .single()
+      .returning()
 
-    if (error) {
-      console.error('[Variation Groups API] POST error:', error)
-      return NextResponse.json({ error: error.message }, { status: 500 })
-    }
-
-    return NextResponse.json({ group: data }, { status: 201 })
+    return NextResponse.json({ group: inserted }, { status: 201 })
   } catch (error) {
     console.error('[Variation Groups API] POST exception:', error)
     return NextResponse.json(
@@ -124,7 +116,6 @@ export async function POST(request: NextRequest) {
  */
 export async function PUT(request: NextRequest) {
   try {
-    const supabase = createServerClient()
     const body = await request.json()
     const { id, ...updates } = body
 
@@ -132,23 +123,23 @@ export async function PUT(request: NextRequest) {
       return NextResponse.json({ error: 'Missing id' }, { status: 400 })
     }
 
-    const { data, error } = await supabase
-      .from('skool_variation_groups')
-      .update({ ...updates, updated_at: new Date().toISOString() })
-      .eq('id', id)
-      .select()
-      .single()
+    // Map snake_case input to camelCase schema columns
+    const setData: Record<string, unknown> = { updatedAt: new Date() }
+    if (updates.name !== undefined) setData.name = updates.name
+    if (updates.description !== undefined) setData.description = updates.description
+    if (updates.is_active !== undefined) setData.isActive = updates.is_active
 
-    if (error) {
-      console.error('[Variation Groups API] PUT error:', error)
-      return NextResponse.json({ error: error.message }, { status: 500 })
-    }
+    const [updated] = await db
+      .update(skoolVariationGroups)
+      .set(setData)
+      .where(eq(skoolVariationGroups.id, id))
+      .returning()
 
-    if (!data) {
+    if (!updated) {
       return NextResponse.json({ error: 'Variation group not found' }, { status: 404 })
     }
 
-    return NextResponse.json({ group: data })
+    return NextResponse.json({ group: updated })
   } catch (error) {
     console.error('[Variation Groups API] PUT exception:', error)
     return NextResponse.json(
@@ -164,7 +155,6 @@ export async function PUT(request: NextRequest) {
  */
 export async function DELETE(request: NextRequest) {
   try {
-    const supabase = createServerClient()
     const { searchParams } = new URL(request.url)
     const id = searchParams.get('id')
 
@@ -174,12 +164,7 @@ export async function DELETE(request: NextRequest) {
 
     // Note: Posts and schedulers will have their variation_group_id set to null
     // due to the ON DELETE SET NULL behavior (if configured) or we handle it here
-    const { error } = await supabase.from('skool_variation_groups').delete().eq('id', id)
-
-    if (error) {
-      console.error('[Variation Groups API] DELETE error:', error)
-      return NextResponse.json({ error: error.message }, { status: 500 })
-    }
+    await db.delete(skoolVariationGroups).where(eq(skoolVariationGroups.id, id))
 
     return NextResponse.json({ success: true })
   } catch (error) {

@@ -6,7 +6,8 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server'
-import { createServerClient } from '@0ne/db/server'
+import { db, eq } from '@0ne/db/server'
+import { telemetryEvents, telemetryStatusHistory } from '@0ne/db/server'
 
 export const dynamic = 'force-dynamic'
 
@@ -57,53 +58,30 @@ export async function POST(
       )
     }
 
-    const supabase = createServerClient()
-
     // Fetch current status so we can record it in history
-    const { data: currentEvent, error: fetchError } = await supabase
-      .from('telemetry_events')
-      .select('status')
-      .eq('id', id)
-      .single()
+    const [currentEvent] = await db.select({ status: telemetryEvents.status })
+      .from(telemetryEvents)
+      .where(eq(telemetryEvents.id, id))
 
-    if (fetchError) {
-      if (fetchError.code === 'PGRST116') {
-        return NextResponse.json(
-          { error: 'Event not found' },
-          { status: 404, headers: corsHeaders }
-        )
-      }
-      console.error('[Installs Notes API] Fetch error:', fetchError)
+    if (!currentEvent) {
       return NextResponse.json(
-        { error: fetchError.message },
-        { status: 500, headers: corsHeaders }
+        { error: 'Event not found' },
+        { status: 404, headers: corsHeaders }
       )
     }
 
     const currentStatus = currentEvent.status || 'new'
 
     // Insert note as history entry (status unchanged)
-    const { data, error } = await supabase
-      .from('telemetry_status_history')
-      .insert({
-        event_id: id,
-        old_status: currentStatus,
-        new_status: currentStatus,
-        note: note.trim(),
-      })
-      .select('id')
-      .single()
-
-    if (error) {
-      console.error('[Installs Notes API] Insert error:', error)
-      return NextResponse.json(
-        { error: error.message },
-        { status: 500, headers: corsHeaders }
-      )
-    }
+    const [historyEntry] = await db.insert(telemetryStatusHistory).values({
+      eventId: id,
+      oldStatus: currentStatus,
+      newStatus: currentStatus,
+      note: note.trim(),
+    }).returning({ id: telemetryStatusHistory.id })
 
     return NextResponse.json(
-      { success: true, id: data.id },
+      { success: true, id: historyEntry.id },
       { headers: corsHeaders }
     )
   } catch (error) {

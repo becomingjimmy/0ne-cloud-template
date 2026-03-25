@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { auth } from '@clerk/nextjs/server'
-import { createServerClient } from '@0ne/db/server'
+import { db, eq, asc } from '@0ne/db/server'
+import { plaidCategoryMappings } from '@0ne/db/server'
 
 export const dynamic = 'force-dynamic'
 
@@ -11,21 +12,11 @@ export async function GET() {
   }
 
   try {
-    const supabase = createServerClient()
+    const mappings = await db.select()
+      .from(plaidCategoryMappings)
+      .orderBy(asc(plaidCategoryMappings.plaidPrimary))
 
-    const { data: mappings, error } = await supabase
-      .from('plaid_category_mappings')
-      .select('*')
-      .order('plaid_primary')
-
-    if (error) {
-      return NextResponse.json(
-        { error: 'Failed to fetch mappings', details: error.message },
-        { status: 500 }
-      )
-    }
-
-    return NextResponse.json({ mappings: mappings || [] })
+    return NextResponse.json({ mappings })
   } catch (error) {
     return NextResponse.json(
       { error: 'Failed to fetch mappings', details: String(error) },
@@ -51,26 +42,18 @@ export async function POST(request: Request) {
       )
     }
 
-    const supabase = createServerClient()
+    const [mapping] = await db.insert(plaidCategoryMappings).values({
+      plaidPrimary: plaid_primary,
+      plaidDetailed: plaid_detailed || null,
+      expenseCategorySlug: expense_category_slug,
+    }).onConflictDoUpdate({
+      target: [plaidCategoryMappings.plaidPrimary, plaidCategoryMappings.plaidDetailed],
+      set: {
+        expenseCategorySlug: expense_category_slug,
+      },
+    }).returning()
 
-    const { data, error } = await supabase
-      .from('plaid_category_mappings')
-      .upsert({
-        plaid_primary,
-        plaid_detailed: plaid_detailed || null,
-        expense_category_slug,
-      }, { onConflict: 'plaid_primary,plaid_detailed' })
-      .select()
-      .single()
-
-    if (error) {
-      return NextResponse.json(
-        { error: 'Failed to save mapping', details: error.message },
-        { status: 500 }
-      )
-    }
-
-    return NextResponse.json({ success: true, mapping: data })
+    return NextResponse.json({ success: true, mapping })
   } catch (error) {
     return NextResponse.json(
       { error: 'Failed to save mapping', details: String(error) },
@@ -96,19 +79,8 @@ export async function DELETE(request: Request) {
       )
     }
 
-    const supabase = createServerClient()
-
-    const { error } = await supabase
-      .from('plaid_category_mappings')
-      .delete()
-      .eq('id', id)
-
-    if (error) {
-      return NextResponse.json(
-        { error: 'Failed to delete mapping', details: error.message },
-        { status: 500 }
-      )
-    }
+    await db.delete(plaidCategoryMappings)
+      .where(eq(plaidCategoryMappings.id, id))
 
     return NextResponse.json({ success: true })
   } catch (error) {

@@ -6,7 +6,8 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server'
-import { createServerClient } from '@0ne/db/server'
+import { db, eq } from '@0ne/db/server'
+import { telemetryFailurePatterns } from '@0ne/db/server'
 
 export const dynamic = 'force-dynamic'
 
@@ -60,40 +61,29 @@ export async function POST(
       )
     }
 
-    const supabase = createServerClient()
-
     const updatePayload: Record<string, unknown> = {
-      known_fix: known_fix.trim(),
-      updated_at: new Date().toISOString(),
+      knownFix: known_fix.trim(),
+      updatedAt: new Date(),
     }
 
     if (typeof auto_fixable === 'boolean') {
-      updatePayload.auto_fixable = auto_fixable
+      updatePayload.autoFixable = auto_fixable
     }
 
-    const { data, error } = await supabase
-      .from('telemetry_failure_patterns')
-      .update(updatePayload)
-      .eq('id', id)
-      .select()
-      .single()
+    const [pattern] = await db.update(telemetryFailurePatterns)
+      .set(updatePayload)
+      .where(eq(telemetryFailurePatterns.id, id))
+      .returning()
 
-    if (error) {
-      if (error.code === 'PGRST116') {
-        return NextResponse.json(
-          { error: 'Pattern not found' },
-          { status: 404, headers: corsHeaders }
-        )
-      }
-      console.error('[Installs Pattern Fix API] Update error:', error)
+    if (!pattern) {
       return NextResponse.json(
-        { error: error.message },
-        { status: 500, headers: corsHeaders }
+        { error: 'Pattern not found' },
+        { status: 404, headers: corsHeaders }
       )
     }
 
     return NextResponse.json(
-      { success: true, pattern: data },
+      { success: true, pattern },
       { headers: corsHeaders }
     )
   } catch (error) {

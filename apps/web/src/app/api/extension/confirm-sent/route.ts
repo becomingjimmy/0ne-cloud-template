@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { createServerClient } from '@0ne/db/server'
+import { db, eq } from '@0ne/db/server'
+import { dmMessages } from '@0ne/db/server'
 import { corsHeaders, validateExtensionAuth } from '@/lib/extension-auth'
 
 export { OPTIONS } from '@/lib/extension-auth'
@@ -66,26 +67,21 @@ export async function POST(request: NextRequest) {
       `[Extension API] Confirming message ${body.messageId}: success=${body.success}`
     )
 
-    const supabase = createServerClient()
-
     if (body.success) {
       // Mark message as synced
-      const { error: updateError } = await supabase
-        .from('dm_messages')
-        .update({
+      try {
+        await db.update(dmMessages).set({
           status: 'synced',
-          synced_at: new Date().toISOString(),
-          // Update skool_message_id if provided (message sent successfully to Skool)
-          ...(body.skoolMessageId && { skool_message_id: body.skoolMessageId }),
-          // Update skool_conversation_id if resolved from placeholder
-          ...(body.resolvedChannelId && { skool_conversation_id: body.resolvedChannelId }),
-        })
-        .eq('id', body.messageId)
-
-      if (updateError) {
+          syncedAt: new Date(),
+          // Update skoolMessageId if provided (message sent successfully to Skool)
+          ...(body.skoolMessageId && { skoolMessageId: body.skoolMessageId }),
+          // Update skoolConversationId if resolved from placeholder
+          ...(body.resolvedChannelId && { skoolConversationId: body.resolvedChannelId }),
+        }).where(eq(dmMessages.id, body.messageId))
+      } catch (updateError) {
         console.error('[Extension API] Failed to update message status:', updateError)
         return NextResponse.json(
-          { success: false, updated: false, error: updateError.message },
+          { success: false, updated: false, error: updateError instanceof Error ? updateError.message : 'Unknown error' },
           { status: 500, headers: corsHeaders }
         )
       }
@@ -100,17 +96,14 @@ export async function POST(request: NextRequest) {
       return NextResponse.json(response, { headers: corsHeaders })
     } else {
       // Mark message as failed
-      const { error: updateError } = await supabase
-        .from('dm_messages')
-        .update({
+      try {
+        await db.update(dmMessages).set({
           status: 'failed',
-        })
-        .eq('id', body.messageId)
-
-      if (updateError) {
+        }).where(eq(dmMessages.id, body.messageId))
+      } catch (updateError) {
         console.error('[Extension API] Failed to update message status:', updateError)
         return NextResponse.json(
-          { success: false, updated: false, error: updateError.message },
+          { success: false, updated: false, error: updateError instanceof Error ? updateError.message : 'Unknown error' },
           { status: 500, headers: corsHeaders }
         )
       }

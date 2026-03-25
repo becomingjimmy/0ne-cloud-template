@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { createServerClient } from '@0ne/db/server'
+import { db, eq, and } from '@0ne/db/server'
+import { staffUsers, dmHandRaiserCampaigns } from '@0ne/db/server'
 import { corsHeaders, validateExtensionAuth } from '@/lib/extension-auth'
 
 export { OPTIONS } from '@/lib/extension-auth'
@@ -80,14 +81,12 @@ export async function GET(request: NextRequest) {
       )
     }
 
-    const supabase = createServerClient()
-
     // Resolve staffSkoolId -> Clerk user_id via staff_users table
-    const { data: staffUser } = await supabase
-      .from('staff_users')
-      .select('clerk_user_id')
-      .eq('skool_user_id', staffSkoolId)
-      .single()
+    const staffUserRows = await db.select({ clerkUserId: staffUsers.clerkUserId })
+      .from(staffUsers)
+      .where(eq(staffUsers.skoolUserId, staffSkoolId))
+
+    const staffUser = staffUserRows[0]
 
     if (!staffUser) {
       console.log(`[Extension API] No staff_users mapping for staffSkoolId: ${staffSkoolId}`)
@@ -97,19 +96,28 @@ export async function GET(request: NextRequest) {
       )
     }
 
-    const clerkUserId = staffUser.clerk_user_id
+    const clerkUserId = staffUser.clerkUserId
 
     // Query active campaigns for this user
-    const { data: campaigns, error } = await supabase
-      .from('dm_hand_raiser_campaigns')
-      .select('id, post_url, skool_post_id, keyword_filter, ghl_tag, dm_template')
-      .eq('clerk_user_id', clerkUserId)
-      .eq('is_active', true)
-
-    if (error) {
-      console.error('[Extension API] Error fetching hand-raiser campaigns:', error)
+    let campaigns
+    try {
+      campaigns = await db.select({
+        id: dmHandRaiserCampaigns.id,
+        postUrl: dmHandRaiserCampaigns.postUrl,
+        skoolPostId: dmHandRaiserCampaigns.skoolPostId,
+        keywordFilter: dmHandRaiserCampaigns.keywordFilter,
+        ghlTag: dmHandRaiserCampaigns.ghlTag,
+        dmTemplate: dmHandRaiserCampaigns.dmTemplate,
+      })
+        .from(dmHandRaiserCampaigns)
+        .where(and(
+          eq(dmHandRaiserCampaigns.clerkUserId, clerkUserId!),
+          eq(dmHandRaiserCampaigns.isActive, true)
+        ))
+    } catch (dbError) {
+      console.error('[Extension API] Error fetching hand-raiser campaigns:', dbError)
       return NextResponse.json(
-        { success: false, error: error.message },
+        { success: false, error: dbError instanceof Error ? dbError.message : 'Unknown error' },
         { status: 500, headers: corsHeaders }
       )
     }
@@ -117,12 +125,12 @@ export async function GET(request: NextRequest) {
     // Transform to camelCase response format with extracted communitySlug
     const campaignResponses: CampaignResponse[] = (campaigns || []).map((c) => ({
       id: c.id,
-      postUrl: c.post_url,
-      skoolPostId: c.skool_post_id,
-      communitySlug: extractCommunitySlug(c.post_url),
-      keywordFilter: c.keyword_filter,
-      ghlTag: c.ghl_tag,
-      dmTemplate: c.dm_template,
+      postUrl: c.postUrl,
+      skoolPostId: c.skoolPostId,
+      communitySlug: extractCommunitySlug(c.postUrl),
+      keywordFilter: c.keywordFilter,
+      ghlTag: c.ghlTag,
+      dmTemplate: c.dmTemplate,
     }))
 
     console.log(

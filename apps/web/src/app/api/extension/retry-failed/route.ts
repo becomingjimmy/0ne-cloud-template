@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { createServerClient } from '@0ne/db/server'
+import { db, eq, and, inArray } from '@0ne/db/server'
+import { dmMessages } from '@0ne/db/server'
 import { corsHeaders, validateExtensionAuth } from '@/lib/extension-auth'
 
 export { OPTIONS } from '@/lib/extension-auth'
@@ -36,38 +37,38 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    const supabase = createServerClient()
+    try {
+      // Build conditions for failed outbound messages
+      const conditions = [
+        eq(dmMessages.direction, 'outbound'),
+        eq(dmMessages.status, 'failed'),
+        eq(dmMessages.staffSkoolId, staffSkoolId),
+      ]
 
-    // Build query for failed messages
-    let query = supabase
-      .from('dm_messages')
-      .update({ status: 'pending' })
-      .eq('direction', 'outbound')
-      .eq('status', 'failed')
-      .eq('staff_skool_id', staffSkoolId)
+      // If specific message IDs provided, filter to those
+      if (messageIds && Array.isArray(messageIds) && messageIds.length > 0) {
+        conditions.push(inArray(dmMessages.id, messageIds))
+      }
 
-    // If specific message IDs provided, filter to those
-    if (messageIds && Array.isArray(messageIds) && messageIds.length > 0) {
-      query = query.in('id', messageIds)
-    }
+      const data = await db.update(dmMessages)
+        .set({ status: 'pending' })
+        .where(and(...conditions))
+        .returning({ id: dmMessages.id })
 
-    const { data, error, count } = await query.select('id')
+      const resetCount = data?.length || 0
+      console.log(`[Extension API] Reset ${resetCount} failed messages to pending`)
 
-    if (error) {
-      console.error('[Extension API] Retry failed error:', error)
+      return NextResponse.json({
+        success: true,
+        reset: resetCount,
+      }, { headers: corsHeaders })
+    } catch (dbError) {
+      console.error('[Extension API] Retry failed error:', dbError)
       return NextResponse.json(
-        { error: 'Database update failed', details: error.message },
+        { error: 'Database update failed', details: dbError instanceof Error ? dbError.message : 'Unknown error' },
         { status: 500, headers: corsHeaders }
       )
     }
-
-    const resetCount = data?.length || 0
-    console.log(`[Extension API] Reset ${resetCount} failed messages to pending`)
-
-    return NextResponse.json({
-      success: true,
-      reset: resetCount,
-    }, { headers: corsHeaders })
   } catch (error) {
     console.error('[Extension API] POST retry-failed exception:', error)
     return NextResponse.json(

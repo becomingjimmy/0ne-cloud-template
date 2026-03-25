@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { auth } from '@clerk/nextjs/server'
-import { createServerClient } from '@0ne/db/server'
+import { db, eq, asc, and } from '@0ne/db/server'
+import { plaidItems, plaidAccounts } from '@0ne/db/server'
 import { getBalances } from '@/lib/plaid-client'
 import { decryptAccessToken } from '@/lib/plaid-encryption'
 
@@ -17,29 +18,27 @@ export async function GET(request: Request) {
     const refresh = searchParams.get('refresh') === 'true'
     const scope = searchParams.get('scope') // 'personal', 'business', or null (all)
 
-    const supabase = createServerClient()
-
     if (refresh) {
       // Live-fetch from Plaid and update cache
-      const { data: items } = await supabase
-        .from('plaid_items')
-        .select('id, access_token')
-        .eq('status', 'active')
+      const items = await db.select({
+        id: plaidItems.id,
+        accessToken: plaidItems.accessToken,
+      }).from(plaidItems)
+        .where(eq(plaidItems.status, 'active'))
 
-      for (const item of items || []) {
+      for (const item of items) {
         try {
-          const accessToken = decryptAccessToken(item.access_token)
-          const accounts = await getBalances(accessToken)
+          const accessToken = decryptAccessToken(item.accessToken)
+          const plaidAccountsList = await getBalances(accessToken)
 
-          for (const account of accounts) {
-            await supabase
-              .from('plaid_accounts')
-              .update({
-                current_balance: account.balances.current,
-                available_balance: account.balances.available,
-                credit_limit: account.balances.limit || null,
+          for (const account of plaidAccountsList) {
+            await db.update(plaidAccounts)
+              .set({
+                currentBalance: account.balances.current != null ? String(account.balances.current) : null,
+                availableBalance: account.balances.available != null ? String(account.balances.available) : null,
+                creditLimit: account.balances.limit ? String(account.balances.limit) : null,
               })
-              .eq('account_id', account.account_id)
+              .where(eq(plaidAccounts.accountId, account.account_id))
           }
         } catch (error) {
           console.error(`Error refreshing balances for item ${item.id}:`, error)
@@ -47,48 +46,39 @@ export async function GET(request: Request) {
       }
     }
 
-    // Return cached balances from DB
-    let query = supabase
-      .from('plaid_accounts')
-      .select(`
-        id,
-        account_id,
-        name,
-        official_name,
-        type,
-        subtype,
-        mask,
-        current_balance,
-        available_balance,
-        credit_limit,
-        iso_currency_code,
-        is_hidden,
-        scope,
-        item_id,
-        plaid_items(institution_name)
-      `)
-      .eq('is_hidden', false)
+    // Return cached balances from DB — join with plaid_items for institution_name
+    const filters = [
+      eq(plaidAccounts.isHidden, false),
+      ...(scope === 'personal' || scope === 'business' ? [eq(plaidAccounts.scope, scope)] : []),
+    ]
 
-    // Filter by scope if specified
-    if (scope === 'personal' || scope === 'business') {
-      query = query.eq('scope', scope)
-    }
-
-    const { data: accounts, error } = await query.order('type')
-
-    if (error) {
-      return NextResponse.json(
-        { error: 'Failed to fetch balances', details: error.message },
-        { status: 500 }
-      )
-    }
+    const accounts = await db.select({
+      id: plaidAccounts.id,
+      accountId: plaidAccounts.accountId,
+      name: plaidAccounts.name,
+      officialName: plaidAccounts.officialName,
+      type: plaidAccounts.type,
+      subtype: plaidAccounts.subtype,
+      mask: plaidAccounts.mask,
+      currentBalance: plaidAccounts.currentBalance,
+      availableBalance: plaidAccounts.availableBalance,
+      creditLimit: plaidAccounts.creditLimit,
+      isoCurrencyCode: plaidAccounts.isoCurrencyCode,
+      isHidden: plaidAccounts.isHidden,
+      scope: plaidAccounts.scope,
+      itemId: plaidAccounts.itemId,
+      institutionName: plaidItems.institutionName,
+    }).from(plaidAccounts)
+      .leftJoin(plaidItems, eq(plaidAccounts.itemId, plaidItems.id))
+      .where(and(...filters))
+      .orderBy(asc(plaidAccounts.type))
 
     // Calculate summary
-    const depository = (accounts || []).filter((a) => a.type === 'depository')
-    const credit = (accounts || []).filter((a) => a.type === 'credit')
+    const depository = accounts.filter((a) => a.type === 'depository')
+    const credit = accounts.filter((a) => a.type === 'credit')
 
-    const totalAssets = depository.reduce((sum, a) => sum + (a.current_balance || 0), 0)
-    const totalLiabilities = credit.reduce((sum, a) => sum + Math.abs(a.current_balance || 0), 0)
+    const totalAssets = depository.reduce((sum, a) => sum + (Number(a.currentBalance) || 0), 0)
+    const totalLiabilities = credit.reduce((sum, a) => sum + Math.abs(Number(a.currentBalance) || 0), 0)
     const netWorth = totalAssets - totalLiabilities
 
     // Group by type
@@ -96,18 +86,18 @@ export async function GET(request: Request) {
       checking: depository.filter((a) => a.subtype === 'checking'),
       savings: depository.filter((a) => a.subtype === 'savings'),
       credit: credit,
-      other: (accounts || []).filter((a) => !['depository', 'credit'].includes(a.type)),
+      other: accounts.filter((a) => !['depository', 'credit'].includes(a.type ?? '')),
     }
 
     return NextResponse.json({
-      accounts: accounts || [],
+      accounts,
       grouped,
       summary: {
         totalAssets,
         totalLiabilities,
         netWorth,
-        totalChecking: grouped.checking.reduce((sum, a) => sum + (a.available_balance ?? a.current_balance ?? 0), 0),
-        totalSavings: grouped.savings.reduce((sum, a) => sum + (a.available_balance ?? a.current_balance ?? 0), 0),
+        totalChecking: grouped.checking.reduce((sum, a) => sum + (Number(a.availableBalance) || Number(a.currentBalance) || 0), 0),
+        totalSavings: grouped.savings.reduce((sum, a) => sum + (Number(a.availableBalance) || Number(a.currentBalance) || 0), 0),
       },
     })
   } catch (error) {

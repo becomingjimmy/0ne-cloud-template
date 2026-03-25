@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { auth } from '@clerk/nextjs/server'
-import { createServerClient } from '@0ne/db/server'
+import { db, eq } from '@0ne/db/server'
+import { plaidItems, plaidAccounts } from '@0ne/db/server'
 import { exchangePublicToken, getBalances, getItemInfo, getInstitution } from '@/lib/plaid-client'
 import { encryptAccessToken } from '@/lib/plaid-encryption'
 
@@ -43,49 +44,33 @@ export async function POST(request: Request) {
     // Get initial account balances
     const accounts = await getBalances(accessToken)
 
-    const supabase = createServerClient()
-
     // Store the item
-    const { data: plaidItem, error: itemError } = await supabase
-      .from('plaid_items')
-      .insert({
-        item_id: itemId,
-        access_token: encryptedToken,
-        institution_id: item.institution_id,
-        institution_name: institutionName,
-        status: 'active',
-      })
-      .select()
-      .single()
-
-    if (itemError) {
-      console.error('Insert plaid item error:', itemError)
-      return NextResponse.json(
-        { error: 'Failed to store bank connection', details: itemError.message },
-        { status: 500 }
-      )
-    }
+    const [plaidItem] = await db.insert(plaidItems).values({
+      itemId: itemId,
+      accessToken: encryptedToken,
+      institutionId: item.institution_id,
+      institutionName: institutionName,
+      status: 'active',
+    }).returning()
 
     // Store accounts with initial balances
     const accountRows = accounts.map((account) => ({
-      item_id: plaidItem.id,
-      account_id: account.account_id,
+      itemId: plaidItem.id,
+      accountId: account.account_id,
       name: account.name,
-      official_name: account.official_name || null,
+      officialName: account.official_name || null,
       type: account.type,
       subtype: account.subtype || null,
       mask: account.mask || null,
-      current_balance: account.balances.current,
-      available_balance: account.balances.available,
-      credit_limit: account.balances.limit || null,
-      iso_currency_code: account.balances.iso_currency_code || 'USD',
+      currentBalance: String(account.balances.current),
+      availableBalance: String(account.balances.available),
+      creditLimit: account.balances.limit ? String(account.balances.limit) : null,
+      isoCurrencyCode: account.balances.iso_currency_code || 'USD',
     }))
 
-    const { error: accountsError } = await supabase
-      .from('plaid_accounts')
-      .insert(accountRows)
-
-    if (accountsError) {
+    try {
+      await db.insert(plaidAccounts).values(accountRows)
+    } catch (accountsError) {
       console.error('Insert plaid accounts error:', accountsError)
       // Don't fail the whole request — item is saved, accounts can be re-fetched
     }

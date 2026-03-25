@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { auth } from '@clerk/nextjs/server'
-import { createServerClient } from '@0ne/db/server'
+import { db, eq, and } from '@0ne/db/server'
+import { plaidItems, plaidAccounts, plaidTransactions, plaidCategoryMappings } from '@0ne/db/server'
 import { syncTransactions } from '@/lib/plaid-client'
 import { decryptAccessToken } from '@/lib/plaid-encryption'
 
@@ -16,21 +17,20 @@ export async function POST(request: Request) {
     const body = await request.json().catch(() => ({}))
     const targetItemId = body.item_id || null
 
-    const supabase = createServerClient()
-
     // Get items to sync
-    let itemsQuery = supabase
-      .from('plaid_items')
-      .select('id, item_id, access_token, transaction_cursor')
-      .eq('status', 'active')
+    const whereClause = targetItemId
+      ? and(eq(plaidItems.status, 'active'), eq(plaidItems.id, targetItemId))
+      : eq(plaidItems.status, 'active')
 
-    if (targetItemId) {
-      itemsQuery = itemsQuery.eq('id', targetItemId)
-    }
+    const filteredItems = await db.select({
+      id: plaidItems.id,
+      itemId: plaidItems.itemId,
+      accessToken: plaidItems.accessToken,
+      transactionCursor: plaidItems.transactionCursor,
+    }).from(plaidItems)
+      .where(whereClause)
 
-    const { data: items, error: itemsError } = await itemsQuery
-
-    if (itemsError || !items || items.length === 0) {
+    if (filteredItems.length === 0) {
       return NextResponse.json({
         success: true,
         message: 'No active items to sync',
@@ -39,43 +39,46 @@ export async function POST(request: Request) {
     }
 
     // Get category mappings (used to tag transactions with mapped_category for display)
-    const { data: mappings } = await supabase
-      .from('plaid_category_mappings')
-      .select('plaid_primary, plaid_detailed, expense_category_slug')
+    const mappings = await db.select({
+      plaidPrimary: plaidCategoryMappings.plaidPrimary,
+      plaidDetailed: plaidCategoryMappings.plaidDetailed,
+      expenseCategorySlug: plaidCategoryMappings.expenseCategorySlug,
+    }).from(plaidCategoryMappings)
 
     const mappingLookup = new Map<string, string>()
-    mappings?.forEach((m) => {
+    mappings.forEach((m) => {
       // Detailed mapping takes priority (key: "PRIMARY:DETAILED")
-      if (m.plaid_detailed) {
-        mappingLookup.set(`${m.plaid_primary}:${m.plaid_detailed}`, m.expense_category_slug)
+      if (m.plaidDetailed) {
+        mappingLookup.set(`${m.plaidPrimary}:${m.plaidDetailed}`, m.expenseCategorySlug ?? '')
       }
       // Primary-only mapping (key: "PRIMARY")
-      if (!mappingLookup.has(m.plaid_primary)) {
-        mappingLookup.set(m.plaid_primary, m.expense_category_slug)
+      if (!mappingLookup.has(m.plaidPrimary)) {
+        mappingLookup.set(m.plaidPrimary, m.expenseCategorySlug ?? '')
       }
     })
 
     let totalSynced = 0
     const errors: string[] = []
 
-    for (const item of items) {
+    for (const item of filteredItems) {
       try {
-        const accessToken = decryptAccessToken(item.access_token)
+        const accessToken = decryptAccessToken(item.accessToken)
 
         // Sync transactions from Plaid
         const { added, modified, removed, cursor } = await syncTransactions(
           accessToken,
-          item.transaction_cursor
+          item.transactionCursor
         )
 
         // Get account ID mapping (plaid account_id -> our UUID)
-        const { data: accounts } = await supabase
-          .from('plaid_accounts')
-          .select('id, account_id')
-          .eq('item_id', item.id)
+        const accountRows = await db.select({
+          id: plaidAccounts.id,
+          accountId: plaidAccounts.accountId,
+        }).from(plaidAccounts)
+          .where(eq(plaidAccounts.itemId, item.id))
 
         const accountMap = new Map<string, string>()
-        accounts?.forEach((a) => accountMap.set(a.account_id, a.id))
+        accountRows.forEach((a) => accountMap.set(a.accountId, a.id))
 
         // Process added transactions
         for (const txn of added) {
@@ -95,28 +98,40 @@ export async function POST(request: Request) {
           }
 
           // Upsert transaction
-          const { error: txnError } = await supabase
-            .from('plaid_transactions')
-            .upsert({
-              transaction_id: txn.transaction_id,
-              account_id: ourAccountId,
-              amount: txn.amount,
+          try {
+            await db.insert(plaidTransactions).values({
+              transactionId: txn.transaction_id,
+              accountId: ourAccountId,
+              amount: txn.amount != null ? String(txn.amount) : null,
               date: txn.date,
               name: txn.name || null,
-              merchant_name: txn.merchant_name || null,
+              merchantName: txn.merchant_name || null,
               category: txn.category || [],
-              personal_finance_category_primary: primary,
-              personal_finance_category_detailed: detailed,
-              mapped_category: mappedCategory,
-              is_pending: txn.pending || false,
-            }, { onConflict: 'transaction_id' })
+              personalFinanceCategoryPrimary: primary,
+              personalFinanceCategoryDetailed: detailed,
+              mappedCategory,
+              isPending: txn.pending || false,
+            }).onConflictDoUpdate({
+              target: plaidTransactions.transactionId,
+              set: {
+                accountId: ourAccountId,
+                amount: txn.amount != null ? String(txn.amount) : null,
+                date: txn.date,
+                name: txn.name || null,
+                merchantName: txn.merchant_name || null,
+                category: txn.category || [],
+                personalFinanceCategoryPrimary: primary,
+                personalFinanceCategoryDetailed: detailed,
+                mappedCategory,
+                isPending: txn.pending || false,
+              },
+            })
 
-          if (txnError) {
+            totalSynced++
+          } catch (txnError) {
             console.error('Upsert transaction error:', txnError)
             continue
           }
-
-          totalSynced++
         }
 
         // Process modified transactions
@@ -135,38 +150,34 @@ export async function POST(request: Request) {
             mappedCategory = mappingLookup.get(primary) || null
           }
 
-          await supabase
-            .from('plaid_transactions')
-            .update({
-              amount: txn.amount,
+          await db.update(plaidTransactions)
+            .set({
+              amount: txn.amount != null ? String(txn.amount) : null,
               date: txn.date,
               name: txn.name || null,
-              merchant_name: txn.merchant_name || null,
+              merchantName: txn.merchant_name || null,
               category: txn.category || [],
-              personal_finance_category_primary: primary,
-              personal_finance_category_detailed: detailed,
-              mapped_category: mappedCategory,
-              is_pending: txn.pending || false,
+              personalFinanceCategoryPrimary: primary,
+              personalFinanceCategoryDetailed: detailed,
+              mappedCategory,
+              isPending: txn.pending || false,
             })
-            .eq('transaction_id', txn.transaction_id)
+            .where(eq(plaidTransactions.transactionId, txn.transaction_id))
         }
 
         // Process removed transactions
         for (const txn of removed) {
-          await supabase
-            .from('plaid_transactions')
-            .delete()
-            .eq('transaction_id', txn.transaction_id)
+          await db.delete(plaidTransactions)
+            .where(eq(plaidTransactions.transactionId, txn.transaction_id))
         }
 
         // Update cursor and last_synced_at on item
-        await supabase
-          .from('plaid_items')
-          .update({
-            transaction_cursor: cursor,
-            last_synced_at: new Date().toISOString(),
+        await db.update(plaidItems)
+          .set({
+            transactionCursor: cursor,
+            lastSyncedAt: new Date(),
           })
-          .eq('id', item.id)
+          .where(eq(plaidItems.id, item.id))
 
       } catch (itemError) {
         console.error(`Error syncing item ${item.id}:`, itemError)

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { createServerClient } from '@0ne/db/server'
+import { db, eq, and, inArray } from '@0ne/db/server'
+import { staffUsers, dmHandRaiserCampaigns, dmHandRaiserSent, dmMessages } from '@0ne/db/server'
 import { findOrCreateGhlContact } from '@/features/dm-sync/lib/contact-mapper'
 import type { DmMessageRow } from '@/features/dm-sync/types'
 import { corsHeaders, validateExtensionAuth } from '@/lib/extension-auth'
@@ -142,14 +143,12 @@ export async function POST(request: NextRequest) {
       `[Extension API] Received ${commenters.length} commenters from staff ${staffSkoolId}`
     )
 
-    const supabase = createServerClient()
-
     // Resolve staffSkoolId -> Clerk clerk_user_id via staff_users table
-    const { data: staffUser } = await supabase
-      .from('staff_users')
-      .select('clerk_user_id')
-      .eq('skool_user_id', staffSkoolId)
-      .single()
+    const staffUserRows = await db.select({ clerkUserId: staffUsers.clerkUserId })
+      .from(staffUsers)
+      .where(eq(staffUsers.skoolUserId, staffSkoolId))
+
+    const staffUser = staffUserRows[0]
 
     if (!staffUser) {
       return NextResponse.json(
@@ -158,23 +157,31 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    const clerkUserId = staffUser.clerk_user_id
+    const clerkUserId = staffUser.clerkUserId!
 
     // Collect unique campaign IDs to batch-fetch campaign details
     const campaignIds = [...new Set(commenters.map((c) => c.campaignId))]
 
     // Fetch all referenced campaigns
-    const { data: campaigns, error: campaignError } = await supabase
-      .from('dm_hand_raiser_campaigns')
-      .select('id, keyword_filter, ghl_tag, dm_template, skool_post_id')
-      .eq('clerk_user_id', clerkUserId)
-      .eq('is_active', true)
-      .in('id', campaignIds)
-
-    if (campaignError) {
+    let campaigns
+    try {
+      campaigns = await db.select({
+        id: dmHandRaiserCampaigns.id,
+        keywordFilter: dmHandRaiserCampaigns.keywordFilter,
+        ghlTag: dmHandRaiserCampaigns.ghlTag,
+        dmTemplate: dmHandRaiserCampaigns.dmTemplate,
+        skoolPostId: dmHandRaiserCampaigns.skoolPostId,
+      })
+        .from(dmHandRaiserCampaigns)
+        .where(and(
+          eq(dmHandRaiserCampaigns.clerkUserId, clerkUserId),
+          eq(dmHandRaiserCampaigns.isActive, true),
+          inArray(dmHandRaiserCampaigns.id, campaignIds)
+        ))
+    } catch (campaignError) {
       console.error('[Extension API] Error fetching campaigns:', campaignError)
       return NextResponse.json(
-        { success: false, error: campaignError.message },
+        { success: false, error: campaignError instanceof Error ? campaignError.message : 'Unknown error' },
         { status: 500, headers: corsHeaders }
       )
     }
@@ -185,13 +192,15 @@ export async function POST(request: NextRequest) {
 
     // Batch-fetch existing dedup records for all commenters
     // Build composite keys: campaign_id + skool_user_id
-    const { data: existingSent } = await supabase
-      .from('dm_hand_raiser_sent')
-      .select('campaign_id, skool_user_id')
-      .in('campaign_id', campaignIds)
+    const existingSent = await db.select({
+      campaignId: dmHandRaiserSent.campaignId,
+      skoolUserId: dmHandRaiserSent.skoolUserId,
+    })
+      .from(dmHandRaiserSent)
+      .where(inArray(dmHandRaiserSent.campaignId, campaignIds))
 
     const sentSet = new Set(
-      (existingSent || []).map((r) => `${r.campaign_id}:${r.skool_user_id}`)
+      (existingSent || []).map((r) => `${r.campaignId}:${r.skoolUserId}`)
     )
 
     // Process results
@@ -221,8 +230,8 @@ export async function POST(request: NextRequest) {
         }
 
         // 3. Keyword filter (if campaign has one)
-        if (campaign.keyword_filter) {
-          const keywords = campaign.keyword_filter
+        if (campaign.keywordFilter) {
+          const keywords = campaign.keywordFilter
             .split(',')
             .map((k: string) => k.trim().toLowerCase())
           const commentLower = commenter.commentContent.toLowerCase()
@@ -244,60 +253,54 @@ export async function POST(request: NextRequest) {
         )
 
         // 5. Tag GHL contact if configured
-        if (campaign.ghl_tag && contactResult.ghlContactId) {
-          await tagGhlContact(contactResult.ghlContactId, campaign.ghl_tag)
+        if (campaign.ghlTag && contactResult.ghlContactId) {
+          await tagGhlContact(contactResult.ghlContactId, campaign.ghlTag)
           tagged++
         }
 
         // 6. Queue DM if template exists
-        if (campaign.dm_template?.trim()) {
-          const dmMessage = interpolateTemplate(campaign.dm_template, {
+        if (campaign.dmTemplate?.trim()) {
+          const dmMessage = interpolateTemplate(campaign.dmTemplate, {
             name: commenter.displayName || commenter.username,
             username: commenter.username,
           })
 
           // Queue in dm_messages with source='hand-raiser' for extension pickup
-          const messageRow: Omit<DmMessageRow, 'id'> = {
-            clerk_user_id: clerkUserId,
-            staff_skool_id: staffSkoolId,
-            skool_conversation_id: `hr-pending-${commenter.skoolUserId}`, // Placeholder — extension will resolve actual conversation
-            skool_message_id: `hr-${commenter.campaignId}-${commenter.skoolUserId}-${Date.now()}`,
-            ghl_message_id: null,
-            skool_user_id: commenter.skoolUserId,
-            direction: 'outbound',
-            message_text: dmMessage,
-            status: 'pending',
-            source: 'hand-raiser',
-            created_at: new Date().toISOString(),
-            synced_at: null,
-          }
-
-          const { error: insertError } = await supabase
-            .from('dm_messages')
-            .insert(messageRow)
-
-          if (insertError) {
-            console.error(`[Extension API] Failed to queue DM:`, insertError)
-            errors.push(`DM queue for ${commenter.username}: ${insertError.message}`)
-          } else {
+          try {
+            await db.insert(dmMessages).values({
+              clerkUserId,
+              staffSkoolId,
+              skoolConversationId: `hr-pending-${commenter.skoolUserId}`, // Placeholder — extension will resolve actual conversation
+              skoolMessageId: `hr-${commenter.campaignId}-${commenter.skoolUserId}-${Date.now()}`,
+              ghlMessageId: null,
+              skoolUserId: commenter.skoolUserId,
+              direction: 'outbound',
+              messageText: dmMessage,
+              status: 'pending',
+              source: 'hand-raiser',
+              createdAt: new Date(),
+              syncedAt: null,
+            })
             dmsQueued++
+          } catch (insertError) {
+            console.error(`[Extension API] Failed to queue DM:`, insertError)
+            errors.push(`DM queue for ${commenter.username}: ${insertError instanceof Error ? insertError.message : 'Unknown error'}`)
           }
         }
 
         // 7. Insert dedup record — only if we have a GHL contact
         if (contactResult.ghlContactId) {
-          const { error: sentError } = await supabase
-            .from('dm_hand_raiser_sent')
-            .insert({
-              campaign_id: commenter.campaignId,
-              skool_user_id: commenter.skoolUserId,
+          try {
+            await db.insert(dmHandRaiserSent).values({
+              campaignId: commenter.campaignId,
+              skoolUserId: commenter.skoolUserId,
             })
-
-          if (sentError) {
+          } catch (sentError: unknown) {
             // Duplicate insert is OK (race condition safety)
-            if (sentError.code !== '23505') {
+            const errCode = (sentError as { code?: string })?.code
+            if (errCode !== '23505') {
               console.error(`[Extension API] Failed to record sent:`, sentError)
-              errors.push(`Dedup record for ${commenter.username}: ${sentError.message}`)
+              errors.push(`Dedup record for ${commenter.username}: ${sentError instanceof Error ? sentError.message : 'Unknown error'}`)
             }
           }
 

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { createServerClient } from '@0ne/db/server'
+import { db, eq, asc } from '@0ne/db/server'
+import { skoolScheduledPosts, skoolVariationGroups } from '@0ne/db/server'
 import type { SkoolScheduledPostInput } from '@0ne/db'
 
 export const dynamic = 'force-dynamic'
@@ -11,19 +12,25 @@ export const dynamic = 'force-dynamic'
  */
 export async function GET() {
   try {
-    const supabase = createServerClient()
-    const { data, error } = await supabase
-      .from('skool_scheduled_posts')
-      .select('*, variation_group:skool_variation_groups(id, name, is_active)')
-      .order('day_of_week')
-      .order('time')
+    const data = await db
+      .select({
+        scheduler: skoolScheduledPosts,
+        variationGroup: {
+          id: skoolVariationGroups.id,
+          name: skoolVariationGroups.name,
+          isActive: skoolVariationGroups.isActive,
+        },
+      })
+      .from(skoolScheduledPosts)
+      .leftJoin(skoolVariationGroups, eq(skoolScheduledPosts.variationGroupId, skoolVariationGroups.id))
+      .orderBy(asc(skoolScheduledPosts.dayOfWeek), asc(skoolScheduledPosts.time))
 
-    if (error) {
-      console.error('[Schedulers API] GET error:', error)
-      return NextResponse.json({ error: error.message }, { status: 500 })
-    }
+    const schedulers = data.map((row) => ({
+      ...row.scheduler,
+      variation_group: row.variationGroup?.id ? row.variationGroup : null,
+    }))
 
-    return NextResponse.json({ schedulers: data })
+    return NextResponse.json({ schedulers })
   } catch (error) {
     console.error('[Schedulers API] GET exception:', error)
     return NextResponse.json(
@@ -39,7 +46,6 @@ export async function GET() {
  */
 export async function POST(request: NextRequest) {
   try {
-    const supabase = createServerClient()
     const body: SkoolScheduledPostInput = await request.json()
 
     // Validate required fields
@@ -66,27 +72,31 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    const { data, error } = await supabase
-      .from('skool_scheduled_posts')
-      .insert({
-        group_slug: body.group_slug || 'fruitful',
+    const [inserted] = await db
+      .insert(skoolScheduledPosts)
+      .values({
+        groupSlug: body.group_slug || 'fruitful',
         category: body.category,
-        category_id: body.category_id || null,
-        day_of_week: body.day_of_week,
+        categoryId: body.category_id || null,
+        dayOfWeek: body.day_of_week,
         time: body.time,
-        variation_group_id: body.variation_group_id || null,
-        is_active: body.is_active ?? true,
+        variationGroupId: body.variation_group_id || null,
+        isActive: body.is_active ?? true,
         note: body.note || null,
       })
-      .select('*, variation_group:skool_variation_groups(id, name, is_active)')
-      .single()
+      .returning()
 
-    if (error) {
-      console.error('[Schedulers API] POST error:', error)
-      return NextResponse.json({ error: error.message }, { status: 500 })
+    // Fetch the variation group if linked
+    let variationGroup = null
+    if (inserted.variationGroupId) {
+      const [vg] = await db
+        .select({ id: skoolVariationGroups.id, name: skoolVariationGroups.name, isActive: skoolVariationGroups.isActive })
+        .from(skoolVariationGroups)
+        .where(eq(skoolVariationGroups.id, inserted.variationGroupId))
+      variationGroup = vg || null
     }
 
-    return NextResponse.json({ scheduler: data }, { status: 201 })
+    return NextResponse.json({ scheduler: { ...inserted, variation_group: variationGroup } }, { status: 201 })
   } catch (error) {
     console.error('[Schedulers API] POST exception:', error)
     return NextResponse.json(
@@ -102,7 +112,6 @@ export async function POST(request: NextRequest) {
  */
 export async function PUT(request: NextRequest) {
   try {
-    const supabase = createServerClient()
     const body = await request.json()
     const { id, ...updates } = body
 
@@ -128,23 +137,38 @@ export async function PUT(request: NextRequest) {
       )
     }
 
-    const { data, error } = await supabase
-      .from('skool_scheduled_posts')
-      .update({ ...updates, updated_at: new Date().toISOString() })
-      .eq('id', id)
-      .select('*, variation_group:skool_variation_groups(id, name, is_active)')
-      .single()
+    // Map snake_case input to camelCase schema columns
+    const setData: Record<string, unknown> = { updatedAt: new Date() }
+    if (updates.group_slug !== undefined) setData.groupSlug = updates.group_slug
+    if (updates.category !== undefined) setData.category = updates.category
+    if (updates.category_id !== undefined) setData.categoryId = updates.category_id
+    if (updates.day_of_week !== undefined) setData.dayOfWeek = updates.day_of_week
+    if (updates.time !== undefined) setData.time = updates.time
+    if (updates.variation_group_id !== undefined) setData.variationGroupId = updates.variation_group_id
+    if (updates.is_active !== undefined) setData.isActive = updates.is_active
+    if (updates.note !== undefined) setData.note = updates.note
 
-    if (error) {
-      console.error('[Schedulers API] PUT error:', error)
-      return NextResponse.json({ error: error.message }, { status: 500 })
-    }
+    const [updated] = await db
+      .update(skoolScheduledPosts)
+      .set(setData)
+      .where(eq(skoolScheduledPosts.id, id))
+      .returning()
 
-    if (!data) {
+    if (!updated) {
       return NextResponse.json({ error: 'Scheduler not found' }, { status: 404 })
     }
 
-    return NextResponse.json({ scheduler: data })
+    // Fetch the variation group if linked
+    let variationGroup = null
+    if (updated.variationGroupId) {
+      const [vg] = await db
+        .select({ id: skoolVariationGroups.id, name: skoolVariationGroups.name, isActive: skoolVariationGroups.isActive })
+        .from(skoolVariationGroups)
+        .where(eq(skoolVariationGroups.id, updated.variationGroupId))
+      variationGroup = vg || null
+    }
+
+    return NextResponse.json({ scheduler: { ...updated, variation_group: variationGroup } })
   } catch (error) {
     console.error('[Schedulers API] PUT exception:', error)
     return NextResponse.json(
@@ -160,7 +184,6 @@ export async function PUT(request: NextRequest) {
  */
 export async function DELETE(request: NextRequest) {
   try {
-    const supabase = createServerClient()
     const { searchParams } = new URL(request.url)
     const id = searchParams.get('id')
 
@@ -168,15 +191,7 @@ export async function DELETE(request: NextRequest) {
       return NextResponse.json({ error: 'Missing id query parameter' }, { status: 400 })
     }
 
-    const { error } = await supabase
-      .from('skool_scheduled_posts')
-      .delete()
-      .eq('id', id)
-
-    if (error) {
-      console.error('[Schedulers API] DELETE error:', error)
-      return NextResponse.json({ error: error.message }, { status: 500 })
-    }
+    await db.delete(skoolScheduledPosts).where(eq(skoolScheduledPosts.id, id))
 
     return NextResponse.json({ success: true })
   } catch (error) {

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { createServerClient } from '@0ne/db/server'
+import { db, eq, and, or, gte, asc, inArray, rawSql } from '@0ne/db/server'
+import { dmMessages, dmSyncConfig, contactChannels } from '@0ne/db/server'
 import { corsHeaders, validateExtensionAuth } from '@/lib/extension-auth'
 
 export { OPTIONS } from '@/lib/extension-auth'
@@ -77,52 +78,74 @@ export async function GET(request: NextRequest) {
 
     console.log(`[Extension API] Fetching pending outbound for staff ${staffSkoolId}`)
 
-    const supabase = createServerClient()
-
     // Debug: First check how many pending outbound messages exist at all
-    const { count: totalPending, data: samplePending } = await supabase
-      .from('dm_messages')
-      .select('id, clerk_user_id, staff_skool_id, source', { count: 'exact' })
-      .eq('direction', 'outbound')
-      .eq('status', 'pending')
+    const samplePending = await db.select({
+      id: dmMessages.id,
+      clerkUserId: dmMessages.clerkUserId,
+      staffSkoolId: dmMessages.staffSkoolId,
+      source: dmMessages.source,
+    })
+      .from(dmMessages)
+      .where(and(
+        eq(dmMessages.direction, 'outbound'),
+        eq(dmMessages.status, 'pending')
+      ))
       .limit(3)
 
-    console.log(`[Extension API] Total pending outbound messages in DB: ${totalPending}`)
     console.log(`[Extension API] Sample pending messages:`, JSON.stringify(samplePending))
     console.log(`[Extension API] Looking for staffSkoolId: ${staffSkoolId}`)
 
     // Fetch skool_community_id from dm_sync_config
-    const { data: syncConfig } = await supabase
-      .from('dm_sync_config')
-      .select('skool_community_id')
+    const syncConfigRows = await db.select({ skoolCommunityId: dmSyncConfig.skoolCommunityId })
+      .from(dmSyncConfig)
       .limit(1)
-      .single()
 
-    const skoolCommunityId = syncConfig?.skool_community_id || null
+    const skoolCommunityId = syncConfigRows[0]?.skoolCommunityId || null
 
     // Query for pending outbound messages
-    const oneDayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString()
+    const oneDayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000)
 
-    const { data: pendingMessages, error } = await supabase
-      .from('dm_messages')
-      .select('id, skool_conversation_id, skool_user_id, message_text, created_at, staff_skool_id, staff_display_name, source')
-      .eq('staff_skool_id', staffSkoolId)
-      .eq('direction', 'outbound')
-      .eq('status', 'pending')
-      .or(`source.eq.manual,source.eq.hand-raiser,and(source.eq.ghl,created_at.gte.${oneDayAgo})`)
-      .order('created_at', { ascending: true })
-      .limit(limit)
-
-    if (error) {
-      console.error('[Extension API] Database error:', error)
+    let pendingMessages
+    try {
+      pendingMessages = await db.select({
+        id: dmMessages.id,
+        skool_conversation_id: dmMessages.skoolConversationId,
+        skool_user_id: dmMessages.skoolUserId,
+        message_text: dmMessages.messageText,
+        created_at: dmMessages.createdAt,
+        staff_skool_id: dmMessages.staffSkoolId,
+        staff_display_name: dmMessages.staffDisplayName,
+        source: dmMessages.source,
+      })
+        .from(dmMessages)
+        .where(and(
+          eq(dmMessages.staffSkoolId, staffSkoolId),
+          eq(dmMessages.direction, 'outbound'),
+          eq(dmMessages.status, 'pending'),
+          or(
+            eq(dmMessages.source, 'manual'),
+            eq(dmMessages.source, 'hand-raiser'),
+            and(eq(dmMessages.source, 'ghl'), gte(dmMessages.createdAt, oneDayAgo))
+          )
+        ))
+        .orderBy(asc(dmMessages.createdAt))
+        .limit(limit)
+    } catch (dbError) {
+      console.error('[Extension API] Database error:', dbError)
       return NextResponse.json(
-        { error: 'Database query failed', details: error.message },
+        { error: 'Database query failed', details: dbError instanceof Error ? dbError.message : 'Unknown error' },
         { status: 500, headers: corsHeaders }
       )
     }
 
     let messages: PendingMessage[] = (pendingMessages || []).map((msg) => ({
-      ...msg,
+      id: msg.id,
+      skool_conversation_id: msg.skool_conversation_id!,
+      skool_user_id: msg.skool_user_id!,
+      message_text: msg.message_text!,
+      created_at: msg.created_at?.toISOString() || new Date().toISOString(),
+      staff_skool_id: msg.staff_skool_id,
+      staff_display_name: msg.staff_display_name,
       skool_community_id: skoolCommunityId,
     }))
 
@@ -134,14 +157,18 @@ export async function GET(request: NextRequest) {
     if (placeholderMessages.length > 0) {
       const skoolUserIds = [...new Set(placeholderMessages.map((m) => m.skool_user_id))]
 
-      const { data: cachedChannels } = await supabase
-        .from('contact_channels')
-        .select('skool_user_id, skool_channel_id')
-        .eq('staff_skool_id', staffSkoolId)
-        .in('skool_user_id', skoolUserIds)
+      const cachedChannels = await db.select({
+        skoolUserId: contactChannels.skoolUserId,
+        skoolChannelId: contactChannels.skoolChannelId,
+      })
+        .from(contactChannels)
+        .where(and(
+          eq(contactChannels.staffSkoolId, staffSkoolId),
+          inArray(contactChannels.skoolUserId, skoolUserIds)
+        ))
 
       if (cachedChannels && cachedChannels.length > 0) {
-        const channelMap = new Map(cachedChannels.map((c) => [c.skool_user_id, c.skool_channel_id]))
+        const channelMap = new Map(cachedChannels.map((c) => [c.skoolUserId, c.skoolChannelId]))
 
         messages = messages.map((msg) => {
           if (

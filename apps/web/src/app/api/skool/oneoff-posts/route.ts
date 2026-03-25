@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { createServerClient } from '@0ne/db/server'
+import { db, eq, and, asc, gte } from '@0ne/db/server'
+import { skoolOneoffPosts, skoolCampaigns } from '@0ne/db/server'
 import type { SkoolOneOffPostInput } from '@0ne/db'
 
 export const dynamic = 'force-dynamic'
@@ -71,39 +72,44 @@ function convertToUTC(localDatetime: string, timezone: string = 'America/New_Yor
  */
 export async function GET(request: NextRequest) {
   try {
-    const supabase = createServerClient()
     const { searchParams } = new URL(request.url)
     const campaignId = searchParams.get('campaign_id')
     const status = searchParams.get('status')
     const upcoming = searchParams.get('upcoming') === 'true'
     const limit = parseInt(searchParams.get('limit') || '100', 10)
 
-    let query = supabase
-      .from('skool_oneoff_posts')
-      .select('*, campaign:skool_campaigns(id, name)')
-      .order('scheduled_at', { ascending: true })
-      .limit(limit)
+    const conditions: ReturnType<typeof eq>[] = []
 
     if (campaignId) {
-      query = query.eq('campaign_id', campaignId)
+      conditions.push(eq(skoolOneoffPosts.campaignId, campaignId))
     }
-
     if (status) {
-      query = query.eq('status', status)
+      conditions.push(eq(skoolOneoffPosts.status, status))
     }
-
     if (upcoming) {
-      query = query.gte('scheduled_at', new Date().toISOString())
+      conditions.push(gte(skoolOneoffPosts.scheduledAt, new Date()))
     }
 
-    const { data, error } = await query
+    const data = await db
+      .select({
+        post: skoolOneoffPosts,
+        campaign: {
+          id: skoolCampaigns.id,
+          name: skoolCampaigns.name,
+        },
+      })
+      .from(skoolOneoffPosts)
+      .leftJoin(skoolCampaigns, eq(skoolOneoffPosts.campaignId, skoolCampaigns.id))
+      .where(conditions.length > 0 ? and(...conditions) : undefined)
+      .orderBy(asc(skoolOneoffPosts.scheduledAt))
+      .limit(limit)
 
-    if (error) {
-      console.error('[One-Off Posts API] GET error:', error)
-      return NextResponse.json({ error: error.message }, { status: 500 })
-    }
+    const posts = data.map((row) => ({
+      ...row.post,
+      campaign: row.campaign?.id ? row.campaign : null,
+    }))
 
-    return NextResponse.json({ posts: data })
+    return NextResponse.json({ posts })
   } catch (error) {
     console.error('[One-Off Posts API] GET exception:', error)
     return NextResponse.json(
@@ -119,7 +125,6 @@ export async function GET(request: NextRequest) {
  */
 export async function POST(request: NextRequest) {
   try {
-    const supabase = createServerClient()
     const body: SkoolOneOffPostInput = await request.json()
 
     // Validate required fields
@@ -140,31 +145,35 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Invalid scheduled_at date format' }, { status: 400 })
     }
 
-    const { data, error } = await supabase
-      .from('skool_oneoff_posts')
-      .insert({
-        group_slug: body.group_slug || 'fruitful',
+    const [inserted] = await db
+      .insert(skoolOneoffPosts)
+      .values({
+        groupSlug: body.group_slug || 'fruitful',
         category: body.category,
-        category_id: body.category_id || null,
-        scheduled_at: scheduledAtUTC,
+        categoryId: body.category_id || null,
+        scheduledAt: scheduledDate,
         timezone: body.timezone || 'America/New_York',
         title: body.title,
         body: body.body,
-        image_url: body.image_url || null,
-        video_url: body.video_url || null,
-        campaign_id: body.campaign_id || null,
-        send_email_blast: body.send_email_blast ?? false,
+        imageUrl: body.image_url || null,
+        videoUrl: body.video_url || null,
+        campaignId: body.campaign_id || null,
+        sendEmailBlast: body.send_email_blast ?? false,
         status: body.status || 'pending',
       })
-      .select('*, campaign:skool_campaigns(id, name)')
-      .single()
+      .returning()
 
-    if (error) {
-      console.error('[One-Off Posts API] POST error:', error)
-      return NextResponse.json({ error: error.message }, { status: 500 })
+    // Fetch the campaign if linked
+    let campaign = null
+    if (inserted.campaignId) {
+      const [c] = await db
+        .select({ id: skoolCampaigns.id, name: skoolCampaigns.name })
+        .from(skoolCampaigns)
+        .where(eq(skoolCampaigns.id, inserted.campaignId))
+      campaign = c || null
     }
 
-    return NextResponse.json({ post: data }, { status: 201 })
+    return NextResponse.json({ post: { ...inserted, campaign } }, { status: 201 })
   } catch (error) {
     console.error('[One-Off Posts API] POST exception:', error)
     return NextResponse.json(
@@ -180,7 +189,6 @@ export async function POST(request: NextRequest) {
  */
 export async function PUT(request: NextRequest) {
   try {
-    const supabase = createServerClient()
     const body = await request.json()
     const { id, ...updates } = body
 
@@ -199,23 +207,42 @@ export async function PUT(request: NextRequest) {
       }
     }
 
-    const { data, error } = await supabase
-      .from('skool_oneoff_posts')
-      .update({ ...updates, updated_at: new Date().toISOString() })
-      .eq('id', id)
-      .select('*, campaign:skool_campaigns(id, name)')
-      .single()
+    // Map snake_case input to camelCase schema columns
+    const setData: Record<string, unknown> = { updatedAt: new Date() }
+    if (updates.group_slug !== undefined) setData.groupSlug = updates.group_slug
+    if (updates.category !== undefined) setData.category = updates.category
+    if (updates.category_id !== undefined) setData.categoryId = updates.category_id
+    if (updates.scheduled_at !== undefined) setData.scheduledAt = new Date(updates.scheduled_at)
+    if (updates.timezone !== undefined) setData.timezone = updates.timezone
+    if (updates.title !== undefined) setData.title = updates.title
+    if (updates.body !== undefined) setData.body = updates.body
+    if (updates.image_url !== undefined) setData.imageUrl = updates.image_url
+    if (updates.video_url !== undefined) setData.videoUrl = updates.video_url
+    if (updates.campaign_id !== undefined) setData.campaignId = updates.campaign_id
+    if (updates.send_email_blast !== undefined) setData.sendEmailBlast = updates.send_email_blast
+    if (updates.status !== undefined) setData.status = updates.status
 
-    if (error) {
-      console.error('[One-Off Posts API] PUT error:', error)
-      return NextResponse.json({ error: error.message }, { status: 500 })
-    }
+    const [updated] = await db
+      .update(skoolOneoffPosts)
+      .set(setData)
+      .where(eq(skoolOneoffPosts.id, id))
+      .returning()
 
-    if (!data) {
+    if (!updated) {
       return NextResponse.json({ error: 'One-off post not found' }, { status: 404 })
     }
 
-    return NextResponse.json({ post: data })
+    // Fetch the campaign if linked
+    let campaign = null
+    if (updated.campaignId) {
+      const [c] = await db
+        .select({ id: skoolCampaigns.id, name: skoolCampaigns.name })
+        .from(skoolCampaigns)
+        .where(eq(skoolCampaigns.id, updated.campaignId))
+      campaign = c || null
+    }
+
+    return NextResponse.json({ post: { ...updated, campaign } })
   } catch (error) {
     console.error('[One-Off Posts API] PUT exception:', error)
     return NextResponse.json(
@@ -231,7 +258,6 @@ export async function PUT(request: NextRequest) {
  */
 export async function DELETE(request: NextRequest) {
   try {
-    const supabase = createServerClient()
     const { searchParams } = new URL(request.url)
     const id = searchParams.get('id')
 
@@ -239,12 +265,7 @@ export async function DELETE(request: NextRequest) {
       return NextResponse.json({ error: 'Missing id query parameter' }, { status: 400 })
     }
 
-    const { error } = await supabase.from('skool_oneoff_posts').delete().eq('id', id)
-
-    if (error) {
-      console.error('[One-Off Posts API] DELETE error:', error)
-      return NextResponse.json({ error: error.message }, { status: 500 })
-    }
+    await db.delete(skoolOneoffPosts).where(eq(skoolOneoffPosts.id, id))
 
     return NextResponse.json({ success: true })
   } catch (error) {

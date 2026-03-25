@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { createServerClient } from '@0ne/db/server'
+import { db, eq, count } from '@0ne/db/server'
+import { skoolVariationGroups, skoolPostLibrary, skoolScheduledPosts } from '@0ne/db/server'
 
 export const dynamic = 'force-dynamic'
 
@@ -13,38 +14,32 @@ export async function GET(
 ) {
   try {
     const { id } = await params
-    const supabase = createServerClient()
 
-    const { data, error } = await supabase
-      .from('skool_variation_groups')
-      .select('*')
-      .eq('id', id)
-      .single()
+    const [data] = await db
+      .select()
+      .from(skoolVariationGroups)
+      .where(eq(skoolVariationGroups.id, id))
 
-    if (error) {
-      if (error.code === 'PGRST116') {
-        return NextResponse.json({ error: 'Variation group not found' }, { status: 404 })
-      }
-      console.error('[Variation Groups API] GET by ID error:', error)
-      return NextResponse.json({ error: error.message }, { status: 500 })
+    if (!data) {
+      return NextResponse.json({ error: 'Variation group not found' }, { status: 404 })
     }
 
     // Get post count
-    const { count: postCount } = await supabase
-      .from('skool_post_library')
-      .select('*', { count: 'exact', head: true })
-      .eq('variation_group_id', id)
+    const [postResult] = await db
+      .select({ value: count() })
+      .from(skoolPostLibrary)
+      .where(eq(skoolPostLibrary.variationGroupId, id))
 
     // Get scheduler count
-    const { count: schedulerCount } = await supabase
-      .from('skool_scheduled_posts')
-      .select('*', { count: 'exact', head: true })
-      .eq('variation_group_id', id)
+    const [schedulerResult] = await db
+      .select({ value: count() })
+      .from(skoolScheduledPosts)
+      .where(eq(skoolScheduledPosts.variationGroupId, id))
 
     const groupWithStats = {
       ...data,
-      post_count: postCount || 0,
-      scheduler_count: schedulerCount || 0,
+      post_count: Number(postResult?.value ?? 0),
+      scheduler_count: Number(schedulerResult?.value ?? 0),
     }
 
     return NextResponse.json({ group: groupWithStats })

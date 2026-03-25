@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { createServerClient } from '@0ne/db/server'
+import { db, eq, and, isNull } from '@0ne/db/server'
+import { skoolAnalytics, skoolMembersDaily, skoolMembersMonthly, skoolCommunityActivityDaily, skoolAboutPageDaily, skoolMetrics } from '@0ne/db/server'
 import { corsHeaders, validateExtensionAuth } from '@/lib/extension-auth'
 
 export { OPTIONS } from '@/lib/extension-auth'
@@ -73,7 +74,6 @@ export async function POST(request: NextRequest) {
       `[Extension API] Received ${metrics.length} analytics metrics from user ${staffSkoolId}`
     )
 
-    const supabase = createServerClient()
     let synced = 0
     let updated = 0
     let skipped = 0
@@ -112,58 +112,53 @@ export async function POST(request: NextRequest) {
           metricDate = new Date().toISOString().split('T')[0]
         }
 
-        const analyticsRow = {
-          staff_skool_id: staffSkoolId,
-          group_id: metric.groupId,
-          post_id: metric.postId || null,
-          metric_type: metric.metricType,
-          metric_value: metric.metricValue,
-          metric_date: metricDate,
-          raw_data: metric.rawData || null,
-        }
-
         // Insert first, handle duplicate via update fallback
         // (Can't use upsert because the unique index uses COALESCE(post_id, '') expression)
-        const { error } = await supabase
-          .from('skool_analytics')
-          .insert(analyticsRow)
-
-        if (error) {
-          if (error.code === '23505') {
+        try {
+          await db.insert(skoolAnalytics).values({
+            staffSkoolId,
+            groupId: metric.groupId,
+            postId: metric.postId || null,
+            metricType: metric.metricType,
+            metricValue: String(metric.metricValue),
+            metricDate,
+            rawData: metric.rawData || null,
+          })
+          synced++
+        } catch (insertError: unknown) {
+          const errCode = (insertError as { code?: string })?.code
+          if (errCode === '23505') {
             // Duplicate - update existing record
-            const updateQuery = supabase
-              .from('skool_analytics')
-              .update({
-                metric_value: metric.metricValue,
-                raw_data: metric.rawData || null,
-                recorded_at: new Date().toISOString(),
-              })
-              .eq('staff_skool_id', staffSkoolId)
-              .eq('group_id', metric.groupId)
-              .eq('metric_type', metric.metricType)
-              .eq('metric_date', metricDate)
+            try {
+              const conditions = [
+                eq(skoolAnalytics.staffSkoolId, staffSkoolId),
+                eq(skoolAnalytics.groupId, metric.groupId),
+                eq(skoolAnalytics.metricType, metric.metricType),
+                eq(skoolAnalytics.metricDate, metricDate),
+              ]
 
-            // Handle post_id NULL vs value
-            if (metric.postId) {
-              updateQuery.eq('post_id', metric.postId)
-            } else {
-              updateQuery.is('post_id', null)
-            }
+              // Handle post_id NULL vs value
+              if (metric.postId) {
+                conditions.push(eq(skoolAnalytics.postId, metric.postId))
+              } else {
+                conditions.push(isNull(skoolAnalytics.postId))
+              }
 
-            const { error: updateError } = await updateQuery
+              await db.update(skoolAnalytics).set({
+                metricValue: String(metric.metricValue),
+                rawData: metric.rawData || null,
+                recordedAt: new Date(),
+              }).where(and(...conditions))
 
-            if (updateError) {
-              console.error(`[Extension API] Error updating metric:`, updateError)
-              errors.push(`Metric ${metric.metricType}: ${updateError.message}`)
-            } else {
               updated++
+            } catch (updateError) {
+              console.error(`[Extension API] Error updating metric:`, updateError)
+              errors.push(`Metric ${metric.metricType}: ${updateError instanceof Error ? updateError.message : 'Unknown error'}`)
             }
           } else {
-            console.error(`[Extension API] Error inserting metric:`, error)
-            errors.push(`Metric ${metric.metricType}: ${error.message}`)
+            console.error(`[Extension API] Error inserting metric:`, insertError)
+            errors.push(`Metric ${metric.metricType}: ${insertError instanceof Error ? insertError.message : 'Unknown error'}`)
           }
-        } else {
-          synced++
         }
       } catch (metricError) {
         console.error(`[Extension API] Exception processing metric:`, metricError)
@@ -204,24 +199,28 @@ export async function POST(request: NextRequest) {
           : null
 
         if (entry.total != null) {
-          const { error: dailyError } = await supabase
-            .from('skool_members_daily')
-            .upsert({
-              group_slug: entry.groupId,
+          try {
+            await db.insert(skoolMembersDaily).values({
+              groupSlug: entry.groupId,
               date,
-              total_members: entry.total,
-              active_members: entry.active ?? null,
-              new_members: newMembers != null && newMembers >= 0 ? newMembers : null,
+              totalMembers: entry.total,
+              activeMembers: entry.active ?? null,
+              newMembers: newMembers != null && newMembers >= 0 ? newMembers : null,
               source: 'extension',
-              updated_at: new Date().toISOString(),
-            }, {
-              onConflict: 'group_slug,date',
+              updatedAt: new Date(),
+            }).onConflictDoUpdate({
+              target: [skoolMembersDaily.groupSlug, skoolMembersDaily.date],
+              set: {
+                totalMembers: entry.total,
+                activeMembers: entry.active ?? null,
+                newMembers: newMembers != null && newMembers >= 0 ? newMembers : null,
+                source: 'extension',
+                updatedAt: new Date(),
+              },
             })
-
-          if (dailyError) {
-            console.error(`[Extension API] Error upserting members_daily for ${date}:`, dailyError)
-          } else {
             membersDaily++
+          } catch (dailyError) {
+            console.error(`[Extension API] Error upserting members_daily for ${date}:`, dailyError)
           }
         }
       }
@@ -285,25 +284,30 @@ export async function POST(request: NextRequest) {
 
       let monthlyUpserted = 0
       for (const [dateKey, entry] of monthlyByDate) {
-        const { error: monthlyError } = await supabase
-          .from('skool_members_monthly')
-          .upsert({
-            group_slug: entry.groupId,
+        try {
+          await db.insert(skoolMembersMonthly).values({
+            groupSlug: entry.groupId,
             month: dateKey,
-            new_members: entry.new_members,
-            existing_members: entry.existing_members,
-            churned_members: entry.churned_members,
-            total_members: entry.total_members,
+            newMembers: entry.new_members,
+            existingMembers: entry.existing_members,
+            churnedMembers: entry.churned_members,
+            totalMembers: entry.total_members,
             source: 'extension',
-            updated_at: new Date().toISOString(),
-          }, {
-            onConflict: 'group_slug,month',
+            updatedAt: new Date(),
+          }).onConflictDoUpdate({
+            target: [skoolMembersMonthly.groupSlug, skoolMembersMonthly.month],
+            set: {
+              newMembers: entry.new_members,
+              existingMembers: entry.existing_members,
+              churnedMembers: entry.churned_members,
+              totalMembers: entry.total_members,
+              source: 'extension',
+              updatedAt: new Date(),
+            },
           })
-
-        if (monthlyError) {
-          console.error(`[Extension API] Error upserting members_monthly for ${dateKey}:`, monthlyError)
-        } else {
           monthlyUpserted++
+        } catch (monthlyError) {
+          console.error(`[Extension API] Error upserting members_monthly for ${dateKey}:`, monthlyError)
         }
       }
 
@@ -332,23 +336,26 @@ export async function POST(request: NextRequest) {
         const dateKey = m.metricDate?.match(/^\d{4}-\d{2}-\d{2}/)?.[0]
         if (!dateKey) continue
 
-        const { error: actError } = await supabase
-          .from('skool_community_activity_daily')
-          .upsert({
-            group_slug: m.groupId,
+        try {
+          await db.insert(skoolCommunityActivityDaily).values({
+            groupSlug: m.groupId,
             date: dateKey,
-            activity_count: m.metricValue,
-            daily_active_members: activeByDate.get(dateKey) ?? null,
+            activityCount: m.metricValue,
+            dailyActiveMembers: activeByDate.get(dateKey) ?? null,
             source: 'extension',
-            updated_at: new Date().toISOString(),
-          }, {
-            onConflict: 'group_slug,date',
+            updatedAt: new Date(),
+          }).onConflictDoUpdate({
+            target: [skoolCommunityActivityDaily.groupSlug, skoolCommunityActivityDaily.date],
+            set: {
+              activityCount: m.metricValue,
+              dailyActiveMembers: activeByDate.get(dateKey) ?? null,
+              source: 'extension',
+              updatedAt: new Date(),
+            },
           })
-
-        if (actError) {
-          console.error(`[Extension API] Error upserting activity_daily for ${dateKey}:`, actError)
-        } else {
           activityDaily++
+        } catch (actError) {
+          console.error(`[Extension API] Error upserting activity_daily for ${dateKey}:`, actError)
         }
       }
       if (activityDaily > 0) {
@@ -377,21 +384,22 @@ export async function POST(request: NextRequest) {
 
         const convRate = conversionByDate.get(dateKey)
 
-        const { error: aboutError } = await supabase
-          .from('skool_about_page_daily')
-          .upsert({
-            group_slug: m.groupId,
+        try {
+          await db.insert(skoolAboutPageDaily).values({
+            groupSlug: m.groupId,
             date: dateKey,
             visitors: m.metricValue,
-            conversion_rate: convRate != null ? Math.round(convRate * 10000) / 100 : null,
-          }, {
-            onConflict: 'group_slug,date',
+            conversionRate: convRate != null ? String(Math.round(convRate * 10000) / 100) : null,
+          }).onConflictDoUpdate({
+            target: [skoolAboutPageDaily.groupSlug, skoolAboutPageDaily.date],
+            set: {
+              visitors: m.metricValue,
+              conversionRate: convRate != null ? String(Math.round(convRate * 10000) / 100) : null,
+            },
           })
-
-        if (aboutError) {
-          console.error(`[Extension API] Error upserting about_page_daily for ${dateKey}:`, aboutError)
-        } else {
           aboutDaily++
+        } catch (aboutError) {
+          console.error(`[Extension API] Error upserting about_page_daily for ${dateKey}:`, aboutError)
         }
       }
       if (aboutDaily > 0) {
@@ -402,39 +410,37 @@ export async function POST(request: NextRequest) {
     // Sync snapshot to skool_metrics (one row per day per group)
     // Collect today's aggregate metrics for the snapshot
     const today = new Date().toISOString().split('T')[0]
-    const snapshotMetrics: Record<string, Record<string, number>> = {}
+    const snapshotMetricsMap: Record<string, Record<string, number>> = {}
     for (const m of metrics) {
       if (m.metricDate !== today) continue
       // Only aggregate non-daily metrics for snapshot
       if (m.metricType.startsWith('daily_')) continue
-      if (!snapshotMetrics[m.groupId]) snapshotMetrics[m.groupId] = {}
-      snapshotMetrics[m.groupId][m.metricType] = m.metricValue
+      if (!snapshotMetricsMap[m.groupId]) snapshotMetricsMap[m.groupId] = {}
+      snapshotMetricsMap[m.groupId][m.metricType] = m.metricValue
     }
 
-    for (const [groupId, snap] of Object.entries(snapshotMetrics)) {
+    for (const [groupId, snap] of Object.entries(snapshotMetricsMap)) {
       const snapshotRow: Record<string, unknown> = {
-        group_slug: groupId,
-        snapshot_date: today,
+        groupSlug: groupId,
+        snapshotDate: today,
       }
-      if (snap.overview_num_members != null) snapshotRow.members_total = snap.overview_num_members
-      if (snap.latest_active_members != null) snapshotRow.members_active = snap.latest_active_members
-      if (snap.overview_mrr != null) snapshotRow.members_active // MRR not in schema, skip
-      if (snap.overview_conversion != null) snapshotRow.conversion_rate = Math.round(snap.overview_conversion * 10000) / 100
-      if (snap.overview_retention != null) snapshotRow.community_activity = Math.round(snap.overview_retention * 10000) / 100
-      if (snap.discovery_category_rank != null) snapshotRow.category_rank = snap.discovery_category_rank
+      if (snap.overview_num_members != null) snapshotRow.membersTotal = snap.overview_num_members
+      if (snap.latest_active_members != null) snapshotRow.membersActive = snap.latest_active_members
+      if (snap.overview_conversion != null) snapshotRow.conversionRate = String(Math.round(snap.overview_conversion * 10000) / 100)
+      if (snap.overview_retention != null) snapshotRow.communityActivity = String(Math.round(snap.overview_retention * 10000) / 100)
+      if (snap.discovery_category_rank != null) snapshotRow.categoryRank = snap.discovery_category_rank
 
       // Only upsert if we have at least one meaningful field
       if (Object.keys(snapshotRow).length > 2) {
-        const { error: snapError } = await supabase
-          .from('skool_metrics')
-          .upsert(snapshotRow, {
-            onConflict: 'group_slug,snapshot_date',
-          })
-
-        if (snapError) {
-          console.error(`[Extension API] Error upserting skool_metrics for ${groupId}:`, snapError)
-        } else {
+        try {
+          await db.insert(skoolMetrics).values(snapshotRow as typeof skoolMetrics.$inferInsert)
+            .onConflictDoUpdate({
+              target: [skoolMetrics.groupSlug, skoolMetrics.snapshotDate],
+              set: snapshotRow as Record<string, unknown>,
+            })
           console.log(`[Extension API] Synced skool_metrics snapshot for ${groupId} on ${today}`)
+        } catch (snapError) {
+          console.error(`[Extension API] Error upserting skool_metrics for ${groupId}:`, snapError)
         }
       }
     }

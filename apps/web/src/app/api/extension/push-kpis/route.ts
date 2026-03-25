@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { createServerClient } from '@0ne/db/server'
+import { db } from '@0ne/db/server'
+import { skoolKpis } from '@0ne/db/server'
 import { corsHeaders, validateExtensionAuth } from '@/lib/extension-auth'
 
 export { OPTIONS } from '@/lib/extension-auth'
@@ -63,35 +64,27 @@ export async function POST(request: NextRequest) {
     }
 
     const { staffSkoolId, groupId, kpis } = body
-    const now = new Date().toISOString()
+    const now = new Date()
 
     console.log(
       `[Extension API] Received ${kpis.length} KPIs for group ${groupId}`
     )
 
-    const supabase = createServerClient()
     let inserted = 0
     const errors: string[] = []
 
     // Insert KPIs (always create new records for time-series data)
     for (const kpi of kpis) {
       try {
-        const kpiRow = {
-          staff_skool_id: staffSkoolId,
-          group_id: groupId,
-          metric_name: kpi.metricName,
-          metric_value: kpi.metricValue,
-          recorded_at: now,
-        }
+        await db.insert(skoolKpis).values({
+          staffSkoolId,
+          groupId,
+          metricName: kpi.metricName,
+          metricValue: kpi.metricValue != null ? String(kpi.metricValue) : null,
+          recordedAt: now,
+        })
 
-        const { error } = await supabase.from('skool_kpis').insert(kpiRow)
-
-        if (error) {
-          console.error(`[Extension API] Error inserting KPI ${kpi.metricName}:`, error)
-          errors.push(`KPI ${kpi.metricName}: ${error.message}`)
-        } else {
-          inserted++
-        }
+        inserted++
       } catch (kpiError) {
         console.error(`[Extension API] Exception processing KPI ${kpi.metricName}:`, kpiError)
         errors.push(

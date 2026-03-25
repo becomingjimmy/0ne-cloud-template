@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { auth } from '@clerk/nextjs/server'
-import { createServerClient } from '@0ne/db/server'
+import { db, eq } from '@0ne/db/server'
+import { plaidItems } from '@0ne/db/server'
 import { removeItem } from '@/lib/plaid-client'
 import { decryptAccessToken } from '@/lib/plaid-encryption'
 
@@ -17,16 +18,15 @@ export async function DELETE(
 
   try {
     const { itemId } = await params
-    const supabase = createServerClient()
 
     // Get the item to find the access token
-    const { data: item, error: fetchError } = await supabase
-      .from('plaid_items')
-      .select('id, access_token')
-      .eq('id', itemId)
-      .single()
+    const [item] = await db.select({
+      id: plaidItems.id,
+      accessToken: plaidItems.accessToken,
+    }).from(plaidItems)
+      .where(eq(plaidItems.id, itemId))
 
-    if (fetchError || !item) {
+    if (!item) {
       return NextResponse.json(
         { error: 'Item not found' },
         { status: 404 }
@@ -35,7 +35,7 @@ export async function DELETE(
 
     // Remove from Plaid
     try {
-      const accessToken = decryptAccessToken(item.access_token)
+      const accessToken = decryptAccessToken(item.accessToken)
       await removeItem(accessToken)
     } catch (plaidError) {
       console.error('Plaid item remove error (continuing with local delete):', plaidError)
@@ -43,18 +43,8 @@ export async function DELETE(
     }
 
     // Delete from database (cascades to accounts and transactions via FK)
-    const { error: deleteError } = await supabase
-      .from('plaid_items')
-      .delete()
-      .eq('id', itemId)
-
-    if (deleteError) {
-      console.error('Delete plaid item error:', deleteError)
-      return NextResponse.json(
-        { error: 'Failed to unlink account', details: deleteError.message },
-        { status: 500 }
-      )
-    }
+    await db.delete(plaidItems)
+      .where(eq(plaidItems.id, itemId))
 
     return NextResponse.json({ success: true })
   } catch (error) {

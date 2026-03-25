@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { createServerClient } from '@0ne/db/server'
+import { db, eq, and, lte, gte, asc, inArray } from '@0ne/db/server'
+import { skoolOneoffPosts, skoolScheduledPosts, skoolPostLibrary } from '@0ne/db/server'
 import { corsHeaders, validateExtensionAuth } from '@/lib/extension-auth'
 
 export { OPTIONS } from '@/lib/extension-auth'
@@ -61,8 +62,6 @@ export async function GET(request: NextRequest) {
     const minutesParam = searchParams.get('minutes')
     const minutes = Math.min(Math.max(parseInt(minutesParam || '5', 10), 1), 30)
 
-    const supabase = createServerClient()
-
     // Calculate the time window
     // Look back 10 minutes to catch "Post Now" posts (status=approved, scheduled_at=NOW)
     // that were queued between poll cycles
@@ -76,18 +75,20 @@ export async function GET(request: NextRequest) {
 
     // Query for one-off posts that are due
     // Accept both 'pending' (normal scheduled) and 'approved' (Post Now) statuses
-    const { data: oneoffPosts, error: oneoffError } = await supabase
-      .from('skool_oneoff_posts')
-      .select('*')
-      .in('status', ['pending', 'approved'])
-      .lte('scheduled_at', futureTime.toISOString())
-      .gte('scheduled_at', lookbackTime.toISOString())
-      .order('scheduled_at', { ascending: true })
-
-    if (oneoffError) {
+    let oneoffPosts
+    try {
+      oneoffPosts = await db.select()
+        .from(skoolOneoffPosts)
+        .where(and(
+          inArray(skoolOneoffPosts.status, ['pending', 'approved']),
+          lte(skoolOneoffPosts.scheduledAt, futureTime),
+          gte(skoolOneoffPosts.scheduledAt, lookbackTime)
+        ))
+        .orderBy(asc(skoolOneoffPosts.scheduledAt))
+    } catch (oneoffError) {
       console.error('[Extension API] Error fetching one-off posts:', oneoffError)
       return NextResponse.json(
-        { success: false, posts: [], error: oneoffError.message } as GetScheduledPostsResponse,
+        { success: false, posts: [], error: oneoffError instanceof Error ? oneoffError.message : 'Unknown error' } as GetScheduledPostsResponse,
         { status: 500, headers: corsHeaders }
       )
     }
@@ -109,15 +110,17 @@ export async function GET(request: NextRequest) {
     })
 
     // Query for recurring schedules that are due
-    const { data: recurringSchedules, error: recurringError } = await supabase
-      .from('skool_scheduled_posts')
-      .select('*')
-      .eq('day_of_week', dayOfWeek)
-      .eq('is_active', true)
-      .gte('time', currentTime)
-      .lte('time', futureTimeStr)
-
-    if (recurringError) {
+    let recurringSchedules: (typeof skoolScheduledPosts.$inferSelect)[] | null = null
+    try {
+      recurringSchedules = await db.select()
+        .from(skoolScheduledPosts)
+        .where(and(
+          eq(skoolScheduledPosts.dayOfWeek, dayOfWeek),
+          eq(skoolScheduledPosts.isActive, true),
+          gte(skoolScheduledPosts.time, currentTime),
+          lte(skoolScheduledPosts.time, futureTimeStr)
+        ))
+    } catch (recurringError) {
       console.error('[Extension API] Error fetching recurring schedules:', recurringError)
       // Continue with one-off posts only
     }
@@ -128,8 +131,8 @@ export async function GET(request: NextRequest) {
     if (recurringSchedules && recurringSchedules.length > 0) {
       for (const schedule of recurringSchedules) {
         // Check if this schedule was already run recently (within 23 hours)
-        if (schedule.last_run_at) {
-          const lastRun = new Date(schedule.last_run_at)
+        if (schedule.lastRunAt) {
+          const lastRun = new Date(schedule.lastRunAt)
           const hoursSinceLastRun = (now.getTime() - lastRun.getTime()) / (1000 * 60 * 60)
           if (hoursSinceLastRun < 23) {
             continue // Skip, already ran
@@ -137,40 +140,40 @@ export async function GET(request: NextRequest) {
         }
 
         // Get the next post content from the library
-        const { data: postContent, error: postError } = await supabase
-          .from('skool_post_library')
-          .select('*')
-          .eq('category', schedule.category)
-          .eq('day_of_week', schedule.day_of_week)
-          .eq('time', schedule.time)
-          .eq('is_active', true)
-          .order('last_used_at', { ascending: true, nullsFirst: true })
-          .order('use_count', { ascending: true })
+        const postContentRows = await db.select()
+          .from(skoolPostLibrary)
+          .where(and(
+            eq(skoolPostLibrary.category, schedule.category!),
+            eq(skoolPostLibrary.dayOfWeek, schedule.dayOfWeek!),
+            eq(skoolPostLibrary.time, schedule.time!),
+            eq(skoolPostLibrary.isActive, true)
+          ))
+          .orderBy(asc(skoolPostLibrary.lastUsedAt), asc(skoolPostLibrary.useCount))
           .limit(1)
-          .single()
 
-        if (postError || !postContent) {
+        const postContent = postContentRows[0]
+
+        if (!postContent) {
           console.warn(
-            `[Extension API] No post content found for schedule ${schedule.id}:`,
-            postError
+            `[Extension API] No post content found for schedule ${schedule.id}`
           )
           continue
         }
 
         // Calculate the actual scheduled time for today
-        const [hours, mins] = schedule.time.split(':').map(Number)
+        const [hours, mins] = schedule.time!.split(':').map(Number)
         const scheduledAt = new Date(now)
         scheduledAt.setHours(hours, mins, 0, 0)
 
         recurringPosts.push({
           id: `recurring:${schedule.id}:${postContent.id}`,
-          groupSlug: schedule.group_slug,
-          category: schedule.category,
-          categoryId: schedule.category_id,
-          title: postContent.title,
-          body: postContent.body,
-          imageUrl: postContent.image_url,
-          videoUrl: postContent.video_url,
+          groupSlug: schedule.groupSlug!,
+          category: schedule.category!,
+          categoryId: schedule.categoryId,
+          title: postContent.title!,
+          body: postContent.body!,
+          imageUrl: postContent.imageUrl,
+          videoUrl: postContent.videoUrl,
           scheduledAt: scheduledAt.toISOString(),
           sendEmailBlast: false, // Recurring posts don't send email blast
         })
@@ -180,15 +183,15 @@ export async function GET(request: NextRequest) {
     // Map one-off posts to response format
     const oneoffMapped: ScheduledPostResponse[] = (oneoffPosts || []).map((post) => ({
       id: post.id,
-      groupSlug: post.group_slug,
-      category: post.category,
-      categoryId: post.category_id,
-      title: post.title,
-      body: post.body,
-      imageUrl: post.image_url,
-      videoUrl: post.video_url,
-      scheduledAt: post.scheduled_at,
-      sendEmailBlast: post.send_email_blast || false,
+      groupSlug: post.groupSlug!,
+      category: post.category!,
+      categoryId: post.categoryId,
+      title: post.title!,
+      body: post.body!,
+      imageUrl: post.imageUrl,
+      videoUrl: post.videoUrl,
+      scheduledAt: post.scheduledAt!.toISOString(),
+      sendEmailBlast: post.sendEmailBlast || false,
     }))
 
     // Combine and sort by scheduled time

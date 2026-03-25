@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { auth } from '@clerk/nextjs/server'
-import { createServerClient } from '@0ne/db/server'
+import { db, eq, gte, lte, ilike, or, and, desc, count } from '@0ne/db/server'
+import { plaidTransactions, plaidAccounts, plaidItems, personalExpenses } from '@0ne/db/server'
 
 export const dynamic = 'force-dynamic'
 
@@ -22,46 +23,74 @@ export async function GET(request: Request) {
     const limit = parseInt(searchParams.get('limit') || '50')
     const offset = (page - 1) * limit
 
-    const supabase = createServerClient()
-
-    let query = supabase
-      .from('plaid_transactions')
-      .select('*, plaid_accounts!inner(name, mask, type, scope, item_id, plaid_items(institution_name))', { count: 'exact' })
-      .order('date', { ascending: false })
-      .range(offset, offset + limit - 1)
-
+    // Build dynamic filter conditions
+    const conditions = []
     if (scope) {
-      query = query.eq('plaid_accounts.scope', scope)
+      conditions.push(eq(plaidAccounts.scope, scope))
     }
     if (accountId) {
-      query = query.eq('account_id', accountId)
+      conditions.push(eq(plaidTransactions.accountId, accountId))
     }
     if (startDate) {
-      query = query.gte('date', startDate)
+      conditions.push(gte(plaidTransactions.date, startDate))
     }
     if (endDate) {
-      query = query.lte('date', endDate)
+      conditions.push(lte(plaidTransactions.date, endDate))
     }
     if (category) {
-      query = query.eq('mapped_category', category)
+      conditions.push(eq(plaidTransactions.mappedCategory, category))
     }
     if (search) {
-      query = query.or(`name.ilike.%${search}%,merchant_name.ilike.%${search}%`)
+      conditions.push(or(
+        ilike(plaidTransactions.name, `%${search}%`),
+        ilike(plaidTransactions.merchantName, `%${search}%`),
+      ))
     }
 
-    const { data: transactions, count, error } = await query
+    const whereClause = conditions.length > 0 ? and(...conditions) : undefined
 
-    if (error) {
-      console.error('Fetch transactions error:', error)
-      return NextResponse.json(
-        { error: 'Failed to fetch transactions', details: error.message },
-        { status: 500 }
-      )
-    }
+    // Run data query and count query in parallel
+    const [transactions, countResult] = await Promise.all([
+      db.select({
+        id: plaidTransactions.id,
+        transactionId: plaidTransactions.transactionId,
+        accountId: plaidTransactions.accountId,
+        amount: plaidTransactions.amount,
+        date: plaidTransactions.date,
+        name: plaidTransactions.name,
+        merchantName: plaidTransactions.merchantName,
+        category: plaidTransactions.category,
+        personalFinanceCategoryPrimary: plaidTransactions.personalFinanceCategoryPrimary,
+        personalFinanceCategoryDetailed: plaidTransactions.personalFinanceCategoryDetailed,
+        mappedCategory: plaidTransactions.mappedCategory,
+        personalExpenseId: plaidTransactions.personalExpenseId,
+        isExcluded: plaidTransactions.isExcluded,
+        isPending: plaidTransactions.isPending,
+        createdAt: plaidTransactions.createdAt,
+        updatedAt: plaidTransactions.updatedAt,
+        accountName: plaidAccounts.name,
+        accountMask: plaidAccounts.mask,
+        accountType: plaidAccounts.type,
+        accountScope: plaidAccounts.scope,
+        accountItemId: plaidAccounts.itemId,
+        institutionName: plaidItems.institutionName,
+      })
+        .from(plaidTransactions)
+        .innerJoin(plaidAccounts, eq(plaidTransactions.accountId, plaidAccounts.id))
+        .leftJoin(plaidItems, eq(plaidAccounts.itemId, plaidItems.id))
+        .where(whereClause)
+        .orderBy(desc(plaidTransactions.date))
+        .limit(limit)
+        .offset(offset),
+      db.select({ count: count() })
+        .from(plaidTransactions)
+        .innerJoin(plaidAccounts, eq(plaidTransactions.accountId, plaidAccounts.id))
+        .where(whereClause),
+    ])
 
     return NextResponse.json({
-      transactions: transactions || [],
-      total: count || 0,
+      transactions,
+      total: countResult[0]?.count ?? 0,
       page,
       limit,
     })
@@ -95,16 +124,20 @@ export async function POST(request: Request) {
       )
     }
 
-    const supabase = createServerClient()
-
     // Fetch the transaction
-    const { data: txn, error: txnError } = await supabase
-      .from('plaid_transactions')
-      .select('id, transaction_id, amount, date, name, merchant_name, mapped_category, personal_expense_id')
-      .eq('id', transaction_id)
-      .single()
+    const [txn] = await db.select({
+      id: plaidTransactions.id,
+      transactionId: plaidTransactions.transactionId,
+      amount: plaidTransactions.amount,
+      date: plaidTransactions.date,
+      name: plaidTransactions.name,
+      merchantName: plaidTransactions.merchantName,
+      mappedCategory: plaidTransactions.mappedCategory,
+      personalExpenseId: plaidTransactions.personalExpenseId,
+    }).from(plaidTransactions)
+      .where(eq(plaidTransactions.id, transaction_id))
 
-    if (txnError || !txn) {
+    if (!txn) {
       return NextResponse.json(
         { error: 'Transaction not found' },
         { status: 404 }
@@ -112,7 +145,7 @@ export async function POST(request: Request) {
     }
 
     // Already promoted
-    if (txn.personal_expense_id) {
+    if (txn.personalExpenseId) {
       return NextResponse.json(
         { error: 'Transaction already added to expenses' },
         { status: 409 }
@@ -120,33 +153,20 @@ export async function POST(request: Request) {
     }
 
     // Create the personal expense
-    const { data: expense, error: expenseError } = await supabase
-      .from('personal_expenses')
-      .insert({
-        name: txn.merchant_name || txn.name || 'Unknown',
-        category: txn.mapped_category || 'other',
-        amount: Math.abs(txn.amount),
-        expense_date: txn.date,
-        frequency: 'one_time',
-        is_active: true,
-        notes: `From bank transaction (${txn.transaction_id})`,
-      })
-      .select('id')
-      .single()
-
-    if (expenseError || !expense) {
-      console.error('Promote transaction error:', expenseError)
-      return NextResponse.json(
-        { error: 'Failed to create expense', details: expenseError?.message },
-        { status: 500 }
-      )
-    }
+    const [expense] = await db.insert(personalExpenses).values({
+      name: txn.merchantName || txn.name || 'Unknown',
+      category: txn.mappedCategory || 'other',
+      amount: String(Math.abs(Number(txn.amount))),
+      expenseDate: txn.date,
+      frequency: 'one_time',
+      isActive: true,
+      notes: `From bank transaction (${txn.transactionId})`,
+    }).returning({ id: personalExpenses.id })
 
     // Link transaction back to the expense
-    await supabase
-      .from('plaid_transactions')
-      .update({ personal_expense_id: expense.id })
-      .eq('id', txn.id)
+    await db.update(plaidTransactions)
+      .set({ personalExpenseId: expense.id })
+      .where(eq(plaidTransactions.id, txn.id))
 
     return NextResponse.json({ success: true, expense_id: expense.id })
   } catch (error) {
@@ -175,32 +195,28 @@ export async function PATCH(request: Request) {
       )
     }
 
-    const supabase = createServerClient()
     const updateData: Record<string, unknown> = {}
 
     if (typeof is_excluded === 'boolean') {
-      updateData.is_excluded = is_excluded
+      updateData.isExcluded = is_excluded
     }
     if (mapped_category !== undefined) {
-      updateData.mapped_category = mapped_category
+      updateData.mappedCategory = mapped_category
     }
 
-    const { data, error } = await supabase
-      .from('plaid_transactions')
-      .update(updateData)
-      .eq('id', id)
-      .select()
-      .single()
+    const [transaction] = await db.update(plaidTransactions)
+      .set(updateData)
+      .where(eq(plaidTransactions.id, id))
+      .returning()
 
-    if (error || !data) {
-      const status = error?.code === 'PGRST116' ? 404 : 500
+    if (!transaction) {
       return NextResponse.json(
-        { error: status === 404 ? 'Transaction not found' : 'Failed to update', details: error?.message },
-        { status }
+        { error: 'Transaction not found' },
+        { status: 404 }
       )
     }
 
-    return NextResponse.json({ success: true, transaction: data })
+    return NextResponse.json({ success: true, transaction })
   } catch (error) {
     console.error('Transaction PATCH error:', error)
     return NextResponse.json(

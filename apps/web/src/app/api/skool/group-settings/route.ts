@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { createServerClient } from '@0ne/db/server'
+import { db, eq } from '@0ne/db/server'
+import { skoolGroupSettings } from '@0ne/db/server'
 import type { EmailBlastStatus } from '@0ne/db'
 
 export const dynamic = 'force-dynamic'
@@ -15,24 +16,16 @@ const COOLDOWN_HOURS = 72
  */
 export async function GET(request: NextRequest) {
   try {
-    const supabase = createServerClient()
     const { searchParams } = new URL(request.url)
     const groupSlug = searchParams.get('group_slug') || 'fruitful'
 
-    const { data, error } = await supabase
-      .from('skool_group_settings')
-      .select('*')
-      .eq('group_slug', groupSlug)
-      .single()
-
-    if (error && error.code !== 'PGRST116') {
-      // PGRST116 = no rows returned
-      console.error('[Group Settings API] GET error:', error)
-      return NextResponse.json({ error: error.message }, { status: 500 })
-    }
+    const [data] = await db
+      .select()
+      .from(skoolGroupSettings)
+      .where(eq(skoolGroupSettings.groupSlug, groupSlug))
 
     // Calculate email blast status
-    const lastBlastAt = data?.last_email_blast_at ? new Date(data.last_email_blast_at) : null
+    const lastBlastAt = data?.lastEmailBlastAt ? new Date(data.lastEmailBlastAt) : null
     let available = true
     let hoursUntilAvailable = 0
 
@@ -49,7 +42,7 @@ export async function GET(request: NextRequest) {
     const emailBlastStatus: EmailBlastStatus = {
       available,
       hours_until_available: hoursUntilAvailable,
-      last_blast_at: data?.last_email_blast_at || null,
+      last_blast_at: data?.lastEmailBlastAt?.toISOString() || null,
     }
 
     return NextResponse.json({
@@ -71,30 +64,29 @@ export async function GET(request: NextRequest) {
  */
 export async function POST(request: NextRequest) {
   try {
-    const supabase = createServerClient()
     const body = await request.json()
     const groupSlug = body.group_slug || 'fruitful'
 
+    const now = new Date()
+
     // Upsert the group settings with the new blast time
-    const { data, error } = await supabase
-      .from('skool_group_settings')
-      .upsert(
-        {
-          group_slug: groupSlug,
-          last_email_blast_at: new Date().toISOString(),
-          updated_at: new Date().toISOString(),
+    const [upserted] = await db
+      .insert(skoolGroupSettings)
+      .values({
+        groupSlug,
+        lastEmailBlastAt: now,
+        updatedAt: now,
+      })
+      .onConflictDoUpdate({
+        target: skoolGroupSettings.groupSlug,
+        set: {
+          lastEmailBlastAt: now,
+          updatedAt: now,
         },
-        { onConflict: 'group_slug' }
-      )
-      .select()
-      .single()
+      })
+      .returning()
 
-    if (error) {
-      console.error('[Group Settings API] POST error:', error)
-      return NextResponse.json({ error: error.message }, { status: 500 })
-    }
-
-    return NextResponse.json({ settings: data })
+    return NextResponse.json({ settings: upserted })
   } catch (error) {
     console.error('[Group Settings API] POST exception:', error)
     return NextResponse.json(

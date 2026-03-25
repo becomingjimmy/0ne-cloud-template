@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { createServerClient } from '@0ne/db/server'
+import { db, eq, and, asc, isNull } from '@0ne/db/server'
+import { skoolPostLibrary, skoolVariationGroups } from '@0ne/db/server'
 import type { SkoolPostLibraryItemInput } from '@0ne/db'
 
 export const dynamic = 'force-dynamic'
@@ -18,7 +19,6 @@ export const dynamic = 'force-dynamic'
  */
 export async function GET(request: NextRequest) {
   try {
-    const supabase = createServerClient()
     const { searchParams } = new URL(request.url)
     const dayOfWeek = searchParams.get('day_of_week')
     const time = searchParams.get('time')
@@ -27,43 +27,51 @@ export async function GET(request: NextRequest) {
     const status = searchParams.get('status')
     const source = searchParams.get('source')
 
-    let query = supabase
-      .from('skool_post_library')
-      .select('*, variation_group:skool_variation_groups(id, name, is_active)')
+    const conditions: ReturnType<typeof eq>[] = []
 
     if (dayOfWeek !== null && dayOfWeek !== '') {
-      query = query.eq('day_of_week', parseInt(dayOfWeek, 10))
+      conditions.push(eq(skoolPostLibrary.dayOfWeek, parseInt(dayOfWeek, 10)))
     }
     if (time) {
-      query = query.eq('time', time)
+      conditions.push(eq(skoolPostLibrary.time, time))
     }
     if (variationGroupId) {
       if (variationGroupId === 'none') {
-        query = query.is('variation_group_id', null)
+        conditions.push(isNull(skoolPostLibrary.variationGroupId))
       } else {
-        query = query.eq('variation_group_id', variationGroupId)
+        conditions.push(eq(skoolPostLibrary.variationGroupId, variationGroupId))
       }
     }
     if (isActive !== null && isActive !== '') {
-      query = query.eq('is_active', isActive === 'true')
+      conditions.push(eq(skoolPostLibrary.isActive, isActive === 'true'))
     }
     if (status) {
-      query = query.eq('status', status)
+      conditions.push(eq(skoolPostLibrary.status, status))
     }
     if (source) {
-      query = query.eq('source', source)
+      conditions.push(eq(skoolPostLibrary.source, source))
     }
 
-    const { data, error } = await query
-      .order('status') // Show drafts first
-      .order('last_used_at', { ascending: true, nullsFirst: true })
+    const data = await db
+      .select({
+        post: skoolPostLibrary,
+        variationGroup: {
+          id: skoolVariationGroups.id,
+          name: skoolVariationGroups.name,
+          isActive: skoolVariationGroups.isActive,
+        },
+      })
+      .from(skoolPostLibrary)
+      .leftJoin(skoolVariationGroups, eq(skoolPostLibrary.variationGroupId, skoolVariationGroups.id))
+      .where(conditions.length > 0 ? and(...conditions) : undefined)
+      .orderBy(asc(skoolPostLibrary.status), asc(skoolPostLibrary.lastUsedAt))
 
-    if (error) {
-      console.error('[Posts API] GET error:', error)
-      return NextResponse.json({ error: error.message }, { status: 500 })
-    }
+    const posts = data.map((row) => ({
+      ...row.post,
+      variation_group: row.variationGroup?.id ? row.variationGroup : null,
+    }))
 
-    return NextResponse.json({ posts: data })
+    return NextResponse.json({ posts })
   } catch (error) {
     console.error('[Posts API] GET exception:', error)
     return NextResponse.json(
@@ -79,7 +87,6 @@ export async function GET(request: NextRequest) {
  */
 export async function POST(request: NextRequest) {
   try {
-    const supabase = createServerClient()
     const body: SkoolPostLibraryItemInput = await request.json()
 
     // Validate required fields (only title and body are truly required now)
@@ -108,30 +115,34 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    const { data, error } = await supabase
-      .from('skool_post_library')
-      .insert({
+    const [inserted] = await db
+      .insert(skoolPostLibrary)
+      .values({
         category: body.category || '',
-        day_of_week: body.day_of_week ?? null,
+        dayOfWeek: body.day_of_week ?? null,
         time: body.time || null,
-        variation_group_id: body.variation_group_id || null,
+        variationGroupId: body.variation_group_id || null,
         title: body.title,
         body: body.body,
-        image_url: body.image_url || null,
-        video_url: body.video_url || null,
-        is_active: body.is_active ?? true,
-        status: body.status || 'active', // Default to active for manual creation
+        imageUrl: body.image_url || null,
+        videoUrl: body.video_url || null,
+        isActive: body.is_active ?? true,
+        status: body.status || 'active',
         source: body.source || 'manual',
       })
-      .select('*, variation_group:skool_variation_groups(id, name, is_active)')
-      .single()
+      .returning()
 
-    if (error) {
-      console.error('[Posts API] POST error:', error)
-      return NextResponse.json({ error: error.message }, { status: 500 })
+    // Fetch the variation group if linked
+    let variationGroup = null
+    if (inserted.variationGroupId) {
+      const [vg] = await db
+        .select({ id: skoolVariationGroups.id, name: skoolVariationGroups.name, isActive: skoolVariationGroups.isActive })
+        .from(skoolVariationGroups)
+        .where(eq(skoolVariationGroups.id, inserted.variationGroupId))
+      variationGroup = vg || null
     }
 
-    return NextResponse.json({ post: data }, { status: 201 })
+    return NextResponse.json({ post: { ...inserted, variation_group: variationGroup } }, { status: 201 })
   } catch (error) {
     console.error('[Posts API] POST exception:', error)
     return NextResponse.json(
@@ -147,7 +158,6 @@ export async function POST(request: NextRequest) {
  */
 export async function PUT(request: NextRequest) {
   try {
-    const supabase = createServerClient()
     const body = await request.json()
     const { id, ...updates } = body
 
@@ -173,29 +183,46 @@ export async function PUT(request: NextRequest) {
       )
     }
 
+    // Map snake_case input to camelCase schema columns
+    const setData: Record<string, unknown> = { updatedAt: new Date() }
+    if (updates.category !== undefined) setData.category = updates.category
+    if (updates.day_of_week !== undefined) setData.dayOfWeek = updates.day_of_week
+    if (updates.time !== undefined) setData.time = updates.time
+    if (updates.variation_group_id !== undefined) setData.variationGroupId = updates.variation_group_id
+    if (updates.title !== undefined) setData.title = updates.title
+    if (updates.body !== undefined) setData.body = updates.body
+    if (updates.image_url !== undefined) setData.imageUrl = updates.image_url
+    if (updates.video_url !== undefined) setData.videoUrl = updates.video_url
+    if (updates.is_active !== undefined) setData.isActive = updates.is_active
+    if (updates.status !== undefined) setData.status = updates.status
+    if (updates.source !== undefined) setData.source = updates.source
+
     // Set approved_at when transitioning to approved status
-    const updateData = { ...updates, updated_at: new Date().toISOString() }
     if (updates.status === 'approved' || updates.status === 'active') {
-      updateData.approved_at = new Date().toISOString()
+      setData.approvedAt = new Date()
     }
 
-    const { data, error } = await supabase
-      .from('skool_post_library')
-      .update(updateData)
-      .eq('id', id)
-      .select('*, variation_group:skool_variation_groups(id, name, is_active)')
-      .single()
+    const [updated] = await db
+      .update(skoolPostLibrary)
+      .set(setData)
+      .where(eq(skoolPostLibrary.id, id))
+      .returning()
 
-    if (error) {
-      console.error('[Posts API] PUT error:', error)
-      return NextResponse.json({ error: error.message }, { status: 500 })
-    }
-
-    if (!data) {
+    if (!updated) {
       return NextResponse.json({ error: 'Post not found' }, { status: 404 })
     }
 
-    return NextResponse.json({ post: data })
+    // Fetch the variation group if linked
+    let variationGroup = null
+    if (updated.variationGroupId) {
+      const [vg] = await db
+        .select({ id: skoolVariationGroups.id, name: skoolVariationGroups.name, isActive: skoolVariationGroups.isActive })
+        .from(skoolVariationGroups)
+        .where(eq(skoolVariationGroups.id, updated.variationGroupId))
+      variationGroup = vg || null
+    }
+
+    return NextResponse.json({ post: { ...updated, variation_group: variationGroup } })
   } catch (error) {
     console.error('[Posts API] PUT exception:', error)
     return NextResponse.json(
@@ -211,7 +238,6 @@ export async function PUT(request: NextRequest) {
  */
 export async function DELETE(request: NextRequest) {
   try {
-    const supabase = createServerClient()
     const { searchParams } = new URL(request.url)
     const id = searchParams.get('id')
 
@@ -219,15 +245,7 @@ export async function DELETE(request: NextRequest) {
       return NextResponse.json({ error: 'Missing id query parameter' }, { status: 400 })
     }
 
-    const { error } = await supabase
-      .from('skool_post_library')
-      .delete()
-      .eq('id', id)
-
-    if (error) {
-      console.error('[Posts API] DELETE error:', error)
-      return NextResponse.json({ error: error.message }, { status: 500 })
-    }
+    await db.delete(skoolPostLibrary).where(eq(skoolPostLibrary.id, id))
 
     return NextResponse.json({ success: true })
   } catch (error) {

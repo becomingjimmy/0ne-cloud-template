@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { createServerClient } from '@0ne/db/server'
+import { db, eq } from '@0ne/db/server'
+import { extensionCookies } from '@0ne/db/server'
 import { corsHeaders, validateExtensionApiKey } from '@/lib/extension-auth'
 
 export { OPTIONS } from '@/lib/extension-auth'
@@ -46,45 +47,31 @@ export async function GET(request: NextRequest) {
       )
     }
 
-    const supabase = createServerClient()
+    const rows = await db.select({
+      authTokenExpiresAt: extensionCookies.authTokenExpiresAt,
+      sessionCookiePresent: extensionCookies.sessionCookiePresent,
+      lastUpdated: extensionCookies.lastUpdated,
+    })
+      .from(extensionCookies)
+      .where(eq(extensionCookies.staffSkoolId, staffSkoolId))
 
-    const { data, error } = await supabase
-      .from('extension_cookies')
-      .select('auth_token_expires_at, session_cookie_present, last_updated')
-      .eq('staff_skool_id', staffSkoolId)
-      .single()
+    const data = rows[0]
 
-    if (error) {
-      // No cookies found is not an error, just no cookies
-      if (error.code === 'PGRST116') {
-        return NextResponse.json(
-          {
-            success: true,
-            hasValidCookies: false,
-            expiresAt: null,
-            expiringSoon: false,
-            hoursRemaining: null,
-          } as CookieStatusResponse,
-          { headers: corsHeaders }
-        )
-      }
-
-      console.error('[Extension API] Error fetching cookie status:', error)
+    if (!data) {
       return NextResponse.json(
         {
-          success: false,
+          success: true,
           hasValidCookies: false,
           expiresAt: null,
           expiringSoon: false,
           hoursRemaining: null,
-          error: `Database error: ${error.message}`,
         } as CookieStatusResponse,
-        { status: 500, headers: corsHeaders }
+        { headers: corsHeaders }
       )
     }
 
     // Calculate expiry status
-    const expiresAt = data.auth_token_expires_at ? new Date(data.auth_token_expires_at) : null
+    const expiresAt = data.authTokenExpiresAt ? new Date(data.authTokenExpiresAt) : null
     const now = new Date()
 
     let hasValidCookies = false

@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { auth, clerkClient } from '@clerk/nextjs/server'
-import { createServerClient } from '@0ne/db/server'
 import { corsHeaders } from '@/lib/extension-auth'
 
 export { OPTIONS } from '@/lib/extension-auth'

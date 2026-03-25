@@ -8,14 +8,13 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server'
-import { createServerClient } from '@0ne/db/server'
-import type { SkoolOneOffPost } from '@0ne/db'
+import { db, eq } from '@0ne/db/server'
+import { skoolOneoffPosts } from '@0ne/db/server'
 
 export const dynamic = 'force-dynamic'
 
 export async function POST(request: NextRequest) {
   try {
-    const supabase = createServerClient()
     const { id } = await request.json()
 
     if (!id) {
@@ -23,48 +22,37 @@ export async function POST(request: NextRequest) {
     }
 
     // Get the post
-    const { data: post, error: fetchError } = await supabase
-      .from('skool_oneoff_posts')
-      .select('*')
-      .eq('id', id)
-      .single()
+    const [post] = await db
+      .select()
+      .from(skoolOneoffPosts)
+      .where(eq(skoolOneoffPosts.id, id))
 
-    if (fetchError || !post) {
+    if (!post) {
       return NextResponse.json({ error: 'Post not found' }, { status: 404 })
     }
 
-    const oneOff = post as SkoolOneOffPost
-
     // Check if post is in an editable status
     const editableStatuses = ['draft', 'approved', 'pending']
-    if (!editableStatuses.includes(oneOff.status)) {
+    if (!post.status || !editableStatuses.includes(post.status)) {
       return NextResponse.json(
-        { error: `Cannot post: status is "${oneOff.status}". Only draft, approved, or scheduled posts can be posted.` },
+        { error: `Cannot post: status is "${post.status}". Only draft, approved, or scheduled posts can be posted.` },
         { status: 400 }
       )
     }
 
-    console.log(`[Post Now] Queuing "${oneOff.title}" for extension publishing`)
+    console.log(`[Post Now] Queuing "${post.title}" for extension publishing`)
 
     // Queue for extension: set status to 'approved' and scheduled_at to NOW
     // The extension polls get-scheduled-posts every 60s and will pick this up
-    const now = new Date().toISOString()
-    const { error: updateError } = await supabase
-      .from('skool_oneoff_posts')
-      .update({
+    const now = new Date()
+    await db
+      .update(skoolOneoffPosts)
+      .set({
         status: 'approved',
-        scheduled_at: now,
-        updated_at: now,
+        scheduledAt: now,
+        updatedAt: now,
       })
-      .eq('id', id)
-
-    if (updateError) {
-      console.error(`[Post Now] Failed to queue post:`, updateError)
-      return NextResponse.json(
-        { error: 'Failed to queue post for publishing' },
-        { status: 500 }
-      )
-    }
+      .where(eq(skoolOneoffPosts.id, id))
 
     console.log(`[Post Now] Post queued successfully — extension will publish within ~60s`)
 

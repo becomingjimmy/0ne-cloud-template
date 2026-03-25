@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server'
 import { auth } from '@clerk/nextjs/server'
-import { createServerClient } from '@0ne/db/server'
-import { sanitizeForPostgrestFilter } from '@/lib/postgrest-utils'
+import { db, eq, asc, desc, ilike, or, ne, and } from '@0ne/db/server'
+import { personalExpenseCategories, personalExpenses } from '@0ne/db/server'
 
 export const dynamic = 'force-dynamic'
 
@@ -16,34 +16,18 @@ export async function GET(request: Request) {
   }
 
   try {
-    const supabase = createServerClient()
-
     // Get all categories
-    const { data: categories, error: categoriesError } = await supabase
-      .from('personal_expense_categories')
-      .select('*')
-      .order('display_order', { ascending: true })
-
-    if (categoriesError) {
-      console.error('Fetch personal categories error:', categoriesError)
-      return NextResponse.json(
-        { error: 'Failed to fetch categories', details: categoriesError.message },
-        { status: 500 }
-      )
-    }
+    const categories = await db.select()
+      .from(personalExpenseCategories)
+      .orderBy(asc(personalExpenseCategories.displayOrder))
 
     // Get expense counts per category
-    const { data: expenseCounts, error: countsError } = await supabase
-      .from('personal_expenses')
-      .select('category')
-
-    if (countsError) {
-      console.error('Fetch personal expense counts error:', countsError)
-    }
+    const expenseCounts = await db.select({ category: personalExpenses.category })
+      .from(personalExpenses)
 
     // Count expenses by category (case-insensitive matching)
     const countMap = new Map<string, number>()
-    expenseCounts?.forEach((exp) => {
+    expenseCounts.forEach((exp) => {
       const cat = (exp.category || '').toLowerCase()
       countMap.set(cat, (countMap.get(cat) || 0) + 1)
     })
@@ -96,18 +80,16 @@ export async function POST(request: Request) {
       .replace(/[^a-z0-9]+/g, '_')
       .replace(/^_|_$/g, '')
 
-    const supabase = createServerClient()
-
     // Check for duplicate name or slug
-    const safeName = sanitizeForPostgrestFilter(name.trim())
-    const safeSlug = sanitizeForPostgrestFilter(slug)
-    const { data: existing } = await supabase
-      .from('personal_expense_categories')
-      .select('id')
-      .or(`name.ilike.${safeName},slug.eq.${safeSlug}`)
+    const existing = await db.select({ id: personalExpenseCategories.id })
+      .from(personalExpenseCategories)
+      .where(or(
+        ilike(personalExpenseCategories.name, name.trim()),
+        eq(personalExpenseCategories.slug, slug),
+      ))
       .limit(1)
 
-    if (existing && existing.length > 0) {
+    if (existing.length > 0) {
       return NextResponse.json(
         { error: 'A category with this name already exists' },
         { status: 409 }
@@ -115,36 +97,23 @@ export async function POST(request: Request) {
     }
 
     // Get max display_order
-    const { data: maxOrder } = await supabase
-      .from('personal_expense_categories')
-      .select('display_order')
-      .order('display_order', { ascending: false })
+    const maxOrder = await db.select({ displayOrder: personalExpenseCategories.displayOrder })
+      .from(personalExpenseCategories)
+      .orderBy(desc(personalExpenseCategories.displayOrder))
       .limit(1)
 
-    const displayOrder = (maxOrder?.[0]?.display_order || 0) + 1
+    const displayOrder = (maxOrder[0]?.displayOrder || 0) + 1
 
     // Insert new category
-    const { data, error } = await supabase
-      .from('personal_expense_categories')
-      .insert({
-        name: name.trim(),
-        slug,
-        color: color || null,
-        description: description || null,
-        display_order: displayOrder,
-      })
-      .select()
-      .single()
+    const [category] = await db.insert(personalExpenseCategories).values({
+      name: name.trim(),
+      slug,
+      color: color || null,
+      description: description || null,
+      displayOrder,
+    }).returning()
 
-    if (error) {
-      console.error('Insert personal category error:', error)
-      return NextResponse.json(
-        { error: 'Failed to create category', details: error.message },
-        { status: 500 }
-      )
-    }
-
-    return NextResponse.json({ success: true, category: data })
+    return NextResponse.json({ success: true, category })
   } catch (error) {
     console.error('Personal expense categories POST error:', error)
     return NextResponse.json(
@@ -176,16 +145,12 @@ export async function PUT(request: Request) {
       )
     }
 
-    const supabase = createServerClient()
-
     // Get existing category
-    const { data: existing, error: fetchError } = await supabase
-      .from('personal_expense_categories')
-      .select('*')
-      .eq('id', id)
-      .single()
+    const [existing] = await db.select()
+      .from(personalExpenseCategories)
+      .where(eq(personalExpenseCategories.id, id))
 
-    if (fetchError || !existing) {
+    if (!existing) {
       return NextResponse.json(
         { error: 'Category not found' },
         { status: 404 }
@@ -204,14 +169,15 @@ export async function PUT(request: Request) {
       }
 
       // Check for duplicate name
-      const { data: duplicate } = await supabase
-        .from('personal_expense_categories')
-        .select('id')
-        .ilike('name', name.trim())
-        .neq('id', id)
+      const duplicate = await db.select({ id: personalExpenseCategories.id })
+        .from(personalExpenseCategories)
+        .where(and(
+          ilike(personalExpenseCategories.name, name.trim()),
+          ne(personalExpenseCategories.id, id),
+        ))
         .limit(1)
 
-      if (duplicate && duplicate.length > 0) {
+      if (duplicate.length > 0) {
         return NextResponse.json(
           { error: 'A category with this name already exists' },
           { status: 409 }
@@ -240,22 +206,12 @@ export async function PUT(request: Request) {
     }
 
     // Update category
-    const { data, error } = await supabase
-      .from('personal_expense_categories')
-      .update(updates)
-      .eq('id', id)
-      .select()
-      .single()
+    const [category] = await db.update(personalExpenseCategories)
+      .set(updates)
+      .where(eq(personalExpenseCategories.id, id))
+      .returning()
 
-    if (error) {
-      console.error('Update personal category error:', error)
-      return NextResponse.json(
-        { error: 'Failed to update category', details: error.message },
-        { status: 500 }
-      )
-    }
-
-    return NextResponse.json({ success: true, category: data })
+    return NextResponse.json({ success: true, category })
   } catch (error) {
     console.error('Personal expense categories PUT error:', error)
     return NextResponse.json(
@@ -286,16 +242,12 @@ export async function DELETE(request: Request) {
       )
     }
 
-    const supabase = createServerClient()
-
     // Get the category
-    const { data: category, error: fetchError } = await supabase
-      .from('personal_expense_categories')
-      .select('*')
-      .eq('id', id)
-      .single()
+    const [category] = await db.select()
+      .from(personalExpenseCategories)
+      .where(eq(personalExpenseCategories.id, id))
 
-    if (fetchError || !category) {
+    if (!category) {
       return NextResponse.json(
         { error: 'Category not found' },
         { status: 404 }
@@ -303,15 +255,15 @@ export async function DELETE(request: Request) {
     }
 
     // Check if any personal expenses use this category
-    // Note: category.name and category.slug come from the database (not user input),
-    // so no sanitization needed — values are trusted
-    const { data: expenses } = await supabase
-      .from('personal_expenses')
-      .select('id')
-      .or(`category.ilike.${category.name},category.eq.${category.slug}`)
+    const expenses = await db.select({ id: personalExpenses.id })
+      .from(personalExpenses)
+      .where(or(
+        ilike(personalExpenses.category, category.name),
+        eq(personalExpenses.category, category.slug),
+      ))
       .limit(1)
 
-    if (expenses && expenses.length > 0) {
+    if (expenses.length > 0) {
       return NextResponse.json(
         { error: 'Cannot delete category that has expenses. Reassign expenses first.' },
         { status: 409 }
@@ -319,18 +271,8 @@ export async function DELETE(request: Request) {
     }
 
     // Delete the category
-    const { error } = await supabase
-      .from('personal_expense_categories')
-      .delete()
-      .eq('id', id)
-
-    if (error) {
-      console.error('Delete personal category error:', error)
-      return NextResponse.json(
-        { error: 'Failed to delete category', details: error.message },
-        { status: 500 }
-      )
-    }
+    await db.delete(personalExpenseCategories)
+      .where(eq(personalExpenseCategories.id, id))
 
     return NextResponse.json({ success: true })
   } catch (error) {

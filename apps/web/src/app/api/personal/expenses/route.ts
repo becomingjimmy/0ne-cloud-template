@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { auth } from '@clerk/nextjs/server'
-import { createServerClient } from '@0ne/db/server'
+import { db, eq, gte, lte, lt, count, and } from '@0ne/db/server'
+import { personalExpenses, personalExpenseCategories } from '@0ne/db/server'
 
 export const dynamic = 'force-dynamic'
 
@@ -96,49 +97,59 @@ export async function GET(request: Request) {
       .toISOString()
       .split('T')[0]
 
-    const supabase = createServerClient()
-
     // Build queries
-    const categoriesQuery = supabase
-      .from('personal_expense_categories')
-      .select('id, name, slug, color')
+    const categoriesQuery = db.select({
+      id: personalExpenseCategories.id,
+      name: personalExpenseCategories.name,
+      slug: personalExpenseCategories.slug,
+      color: personalExpenseCategories.color,
+    }).from(personalExpenseCategories)
 
-    let currentQuery = supabase
-      .from('personal_expenses')
-      .select('id, name, category, amount, frequency, expense_date, is_active, notes')
-      .gte('expense_date', startDate)
-      .lte('expense_date', endDate)
+    const currentFilters = [
+      gte(personalExpenses.expenseDate, startDate),
+      lte(personalExpenses.expenseDate, endDate),
+      ...(category ? [eq(personalExpenses.category, category)] : []),
+    ]
 
-    if (category) {
-      currentQuery = currentQuery.eq('category', category)
-    }
+    const currentQuery = db.select({
+      id: personalExpenses.id,
+      name: personalExpenses.name,
+      category: personalExpenses.category,
+      amount: personalExpenses.amount,
+      frequency: personalExpenses.frequency,
+      expenseDate: personalExpenses.expenseDate,
+      isActive: personalExpenses.isActive,
+      notes: personalExpenses.notes,
+    }).from(personalExpenses).where(and(...currentFilters))
 
-    let prevQuery = supabase
-      .from('personal_expenses')
-      .select('category, amount')
-      .gte('expense_date', previousStartDate)
-      .lt('expense_date', startDate)
+    const prevFilters = [
+      gte(personalExpenses.expenseDate, previousStartDate),
+      lt(personalExpenses.expenseDate, startDate),
+      ...(category ? [eq(personalExpenses.category, category)] : []),
+    ]
 
-    if (category) {
-      prevQuery = prevQuery.eq('category', category)
-    }
+    const prevQuery = db.select({
+      category: personalExpenses.category,
+      amount: personalExpenses.amount,
+    }).from(personalExpenses).where(and(...prevFilters))
 
-    const activeCountQuery = supabase
-      .from('personal_expenses')
-      .select('id', { count: 'exact', head: true })
-      .eq('is_active', true)
+    const activeCountQuery = db.select({ count: count() })
+      .from(personalExpenses)
+      .where(eq(personalExpenses.isActive, true))
 
     // Run all 4 queries in parallel
     const [
-      { data: expenseCategories },
-      { data: currentExpenses },
-      { data: previousExpenses },
-      { count: activeExpenseCount },
+      expenseCategories,
+      currentExpenses,
+      previousExpenses,
+      activeCountResult,
     ] = await Promise.all([categoriesQuery, currentQuery, prevQuery, activeCountQuery])
+
+    const activeExpenseCount = activeCountResult[0]?.count ?? 0
 
     // Build lookup map: lowercase category -> canonical display info
     const categoryCanonical = new Map<string, { id: string; name: string; color: string }>()
-    expenseCategories?.forEach((cat) => {
+    expenseCategories.forEach((cat) => {
       categoryCanonical.set(cat.name.toLowerCase(), {
         id: cat.id,
         name: cat.name,
@@ -159,7 +170,7 @@ export async function GET(request: Request) {
       }
     }
 
-    currentExpenses?.forEach((exp) => {
+    currentExpenses.forEach((exp) => {
       const rawCat = exp.category || 'Other'
       const catKey = getCategoryKey(rawCat)
       if (!categoryMap.has(catKey)) {
@@ -176,7 +187,7 @@ export async function GET(request: Request) {
       entry.current += Number(exp.amount) || 0
     })
 
-    previousExpenses?.forEach((exp) => {
+    previousExpenses.forEach((exp) => {
       const rawCat = exp.category || 'Other'
       const catKey = getCategoryKey(rawCat)
       if (!categoryMap.has(catKey)) {
@@ -205,8 +216,8 @@ export async function GET(request: Request) {
     // Monthly trends — group by YYYY-MM with per-category breakdown
     const monthlyMap = new Map<string, { total: number; byCategory: Record<string, number> }>()
 
-    currentExpenses?.forEach((exp) => {
-      const month = exp.expense_date.substring(0, 7) // YYYY-MM
+    currentExpenses.forEach((exp) => {
+      const month = (exp.expenseDate ?? '').substring(0, 7) // YYYY-MM
       if (!monthlyMap.has(month)) {
         monthlyMap.set(month, { total: 0, byCategory: {} })
       }
@@ -228,7 +239,7 @@ export async function GET(request: Request) {
     const monthlyBurnRate = Number((totalExpenses / monthCount).toFixed(2))
 
     // Format individual expenses for the list
-    const expenses = (currentExpenses || []).map((exp) => {
+    const expenses = currentExpenses.map((exp) => {
       const catKey = (exp.category || 'other').toLowerCase()
       const canonical = getCanonicalInfo(catKey)
       return {
@@ -237,8 +248,8 @@ export async function GET(request: Request) {
         category: canonical.name,
         amount: Number(exp.amount) || 0,
         frequency: exp.frequency || 'one_time',
-        isActive: exp.is_active !== false,
-        expenseDate: exp.expense_date,
+        isActive: exp.isActive !== false,
+        expenseDate: exp.expenseDate,
         notes: exp.notes || null,
       }
     })
@@ -292,31 +303,17 @@ export async function POST(request: Request) {
       )
     }
 
-    const supabase = createServerClient()
+    const [expense] = await db.insert(personalExpenses).values({
+      name: description, // Map description to name column
+      amount: String(Number(amount)),
+      category,
+      expenseDate: expense_date,
+      frequency: frequency || 'one_time',
+      isActive: true,
+      notes: notes || null,
+    }).returning()
 
-    const { data, error } = await supabase
-      .from('personal_expenses')
-      .insert({
-        name: description, // Map description to name column
-        amount: Number(amount),
-        category,
-        expense_date,
-        frequency: frequency || 'one_time',
-        is_active: true,
-        notes: notes || null,
-      })
-      .select()
-      .single()
-
-    if (error) {
-      console.error('Insert personal expense error:', error)
-      return NextResponse.json(
-        { error: 'Failed to add expense', details: error.message },
-        { status: 500 }
-      )
-    }
-
-    return NextResponse.json({ success: true, expense: data })
+    return NextResponse.json({ success: true, expense })
   } catch (error) {
     console.error('Add personal expense error:', error)
     return NextResponse.json(
@@ -355,12 +352,10 @@ export async function PUT(request: Request) {
       )
     }
 
-    const supabase = createServerClient()
-
     // Build update object with only provided fields
     const updateData: Record<string, unknown> = {
       name: description, // Map description to name column
-      amount: Number(amount),
+      amount: String(Number(amount)),
       category,
     }
 
@@ -368,29 +363,26 @@ export async function PUT(request: Request) {
       updateData.frequency = frequency
     }
     if (expense_date) {
-      updateData.expense_date = expense_date
+      updateData.expenseDate = expense_date
     }
     if (notes !== undefined) {
       updateData.notes = notes || null
     }
 
     // Update the expense directly — check result instead of pre-fetching
-    const { data, error } = await supabase
-      .from('personal_expenses')
-      .update(updateData)
-      .eq('id', id)
-      .select()
-      .single()
+    const [expense] = await db.update(personalExpenses)
+      .set(updateData)
+      .where(eq(personalExpenses.id, id))
+      .returning()
 
-    if (error || !data) {
-      const status = error?.code === 'PGRST116' ? 404 : 500
+    if (!expense) {
       return NextResponse.json(
-        { error: status === 404 ? 'Expense not found' : 'Failed to update expense', details: error?.message },
-        { status }
+        { error: 'Expense not found' },
+        { status: 404 }
       )
     }
 
-    return NextResponse.json({ success: true, expense: data })
+    return NextResponse.json({ success: true, expense })
   } catch (error) {
     console.error('Update personal expense error:', error)
     return NextResponse.json(
@@ -429,25 +421,20 @@ export async function PATCH(request: Request) {
       )
     }
 
-    const supabase = createServerClient()
-
     // Update directly — check result instead of pre-fetching
-    const { data, error } = await supabase
-      .from('personal_expenses')
-      .update({ is_active })
-      .eq('id', id)
-      .select()
-      .single()
+    const [expense] = await db.update(personalExpenses)
+      .set({ isActive: is_active })
+      .where(eq(personalExpenses.id, id))
+      .returning()
 
-    if (error || !data) {
-      const status = error?.code === 'PGRST116' ? 404 : 500
+    if (!expense) {
       return NextResponse.json(
-        { error: status === 404 ? 'Expense not found' : 'Failed to update expense', details: error?.message },
-        { status }
+        { error: 'Expense not found' },
+        { status: 404 }
       )
     }
 
-    return NextResponse.json({ success: true, expense: data })
+    return NextResponse.json({ success: true, expense })
   } catch (error) {
     console.error('Patch personal expense error:', error)
     return NextResponse.json(
@@ -478,21 +465,15 @@ export async function DELETE(request: Request) {
       )
     }
 
-    const supabase = createServerClient()
-
     // Delete directly — check result
-    const { data, error } = await supabase
-      .from('personal_expenses')
-      .delete()
-      .eq('id', id)
-      .select('id')
-      .single()
+    const [deleted] = await db.delete(personalExpenses)
+      .where(eq(personalExpenses.id, id))
+      .returning({ id: personalExpenses.id })
 
-    if (error || !data) {
-      const status = error?.code === 'PGRST116' ? 404 : 500
+    if (!deleted) {
       return NextResponse.json(
-        { error: status === 404 ? 'Expense not found' : 'Failed to delete expense', details: error?.message },
-        { status }
+        { error: 'Expense not found' },
+        { status: 404 }
       )
     }
 
