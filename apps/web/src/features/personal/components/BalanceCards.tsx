@@ -12,8 +12,8 @@ function formatBalance(balance: number | null): string {
 
 function AccountRow({ account }: { account: PlaidBalanceAccount }) {
   const utilization =
-    account.type === 'credit' && account.credit_limit && account.current_balance
-      ? Math.round((Math.abs(account.current_balance) / account.credit_limit) * 100)
+    account.type === 'credit' && account.creditLimit && account.currentBalance
+      ? Math.round((Math.abs(account.currentBalance) / account.creditLimit) * 100)
       : null
 
   return (
@@ -26,15 +26,15 @@ function AccountRow({ account }: { account: PlaidBalanceAccount }) {
           )}
         </div>
         <span className="text-xs text-muted-foreground">
-          {account.plaid_items?.institution_name || 'Unknown'}
+          {account.institutionName || 'Unknown'}
         </span>
       </div>
       <div className="text-right">
-        <div className="text-sm font-semibold">{formatBalance(account.current_balance)}</div>
-        {account.available_balance !== null &&
-          account.available_balance !== account.current_balance && (
+        <div className="text-sm font-semibold">{formatBalance(account.currentBalance)}</div>
+        {account.availableBalance !== null &&
+          account.availableBalance !== account.currentBalance && (
             <div className="text-xs text-muted-foreground">
-              Avail: {formatBalance(account.available_balance)}
+              Avail: {formatBalance(account.availableBalance)}
             </div>
           )}
         {utilization !== null && (

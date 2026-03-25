@@ -25,9 +25,9 @@ import { usePlaidAccounts, unlinkItem } from '@/features/personal/hooks/use-plai
 
 interface CategoryMapping {
   id: string
-  plaid_primary: string
-  plaid_detailed: string | null
-  expense_category_slug: string
+  plaidPrimary: string
+  plaidDetailed: string | null
+  expenseCategorySlug: string
 }
 
 export default function IntegrationsPage() {
@@ -37,9 +37,9 @@ export default function IntegrationsPage() {
 
   // Get latest sync time across all items
   const lastSyncedAt = items.reduce<string | null>((latest, item) => {
-    if (!item.last_synced_at) return latest
-    if (!latest) return item.last_synced_at
-    return item.last_synced_at > latest ? item.last_synced_at : latest
+    if (!item.lastSyncedAt) return latest
+    if (!latest) return item.lastSyncedAt
+    return item.lastSyncedAt > latest ? item.lastSyncedAt : latest
   }, null)
 
   const fetchMappings = useCallback(async () => {
@@ -94,14 +94,14 @@ export default function IntegrationsPage() {
 
   const mappingColumns: Column<CategoryMapping>[] = [
     {
-      key: 'plaid_primary',
+      key: 'plaidPrimary',
       header: 'Plaid Category',
       render: (value) => (
         <span className="font-medium">{(value as string).replace(/_/g, ' ')}</span>
       ),
     },
     {
-      key: 'plaid_detailed',
+      key: 'plaidDetailed',
       header: 'Detailed',
       render: (value) => value ? (
         <span className="text-xs text-muted-foreground">{(value as string).replace(/_/g, ' ')}</span>
@@ -110,7 +110,7 @@ export default function IntegrationsPage() {
       ),
     },
     {
-      key: 'expense_category_slug',
+      key: 'expenseCategorySlug',
       header: 'Maps To',
       render: (value) => (
         <span className="capitalize font-medium">{(value as string).replace(/_/g, ' ')}</span>

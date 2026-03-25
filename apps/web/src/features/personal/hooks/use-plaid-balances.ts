@@ -4,17 +4,17 @@ import { useState, useEffect, useCallback } from 'react'
 
 export interface PlaidBalanceAccount {
   id: string
-  account_id: string
+  accountId: string
   name: string
-  official_name: string | null
+  officialName: string | null
   type: string
   subtype: string | null
   mask: string | null
-  current_balance: number | null
-  available_balance: number | null
-  credit_limit: number | null
-  iso_currency_code: string
-  plaid_items: { institution_name: string } | null
+  currentBalance: number | null
+  availableBalance: number | null
+  creditLimit: number | null
+  isoCurrencyCode: string
+  institutionName: string | null
 }
 
 export interface PlaidBalanceSummary {

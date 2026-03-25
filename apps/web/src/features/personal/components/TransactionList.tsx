@@ -31,7 +31,7 @@ export function TransactionList() {
   const handleToggleExclude = async (id: string, currentlyExcluded: boolean) => {
     setTogglingIds((prev) => new Set(prev).add(id))
     try {
-      const result = await updatePlaidTransaction(id, { is_excluded: !currentlyExcluded })
+      const result = await updatePlaidTransaction(id, { isExcluded: !currentlyExcluded })
       if (result.success) {
         toast.success(currentlyExcluded ? 'Transaction included' : 'Transaction excluded')
         refetch()
@@ -56,10 +56,10 @@ export function TransactionList() {
       render: (value) => new Date(value as string).toLocaleDateString(),
     },
     {
-      key: 'merchant_name',
+      key: 'merchantName',
       header: 'Merchant',
       render: (value, row) => (
-        <span className={cn(row.is_excluded && 'text-muted-foreground line-through')}>
+        <span className={cn(row.isExcluded && 'text-muted-foreground line-through')}>
           {(value as string) || row.name || 'Unknown'}
         </span>
       ),
@@ -71,7 +71,7 @@ export function TransactionList() {
       render: (value, row) => (
         <span className={cn(
           'font-medium',
-          row.is_excluded && 'text-muted-foreground',
+          row.isExcluded && 'text-muted-foreground',
           (value as number) > 0 ? 'text-red-600' : 'text-green-600'
         )}>
           {(value as number) > 0 ? '-' : '+'}${Math.abs(value as number).toLocaleString('en-US', { minimumFractionDigits: 2 })}
@@ -79,7 +79,7 @@ export function TransactionList() {
       ),
     },
     {
-      key: 'mapped_category',
+      key: 'mappedCategory',
       header: 'Category',
       render: (value) => {
         if (!value) return <span className="text-muted-foreground text-xs">Unmapped</span>
@@ -95,13 +95,12 @@ export function TransactionList() {
       },
     },
     {
-      key: 'plaid_accounts',
+      key: 'accountName',
       header: 'Account',
-      render: (value) => {
-        const account = value as PlaidTransaction['plaid_accounts']
+      render: (value, row) => {
         return (
           <span className="text-xs text-muted-foreground">
-            {account?.name}{account?.mask ? ` ••${account.mask}` : ''}
+            {(value as string) || 'Unknown'}{row.accountMask ? ` ••${row.accountMask}` : ''}
           </span>
         )
       },
@@ -117,13 +116,13 @@ export function TransactionList() {
           <Button
             variant="ghost"
             size="sm"
-            onClick={() => handleToggleExclude(row.id, row.is_excluded)}
+            onClick={() => handleToggleExclude(row.id, row.isExcluded)}
             disabled={isToggling}
-            title={row.is_excluded ? 'Include transaction' : 'Exclude transaction'}
+            title={row.isExcluded ? 'Include transaction' : 'Exclude transaction'}
           >
             {isToggling ? (
               <Loader2 className="h-4 w-4 animate-spin" />
-            ) : row.is_excluded ? (
+            ) : row.isExcluded ? (
               <Eye className="h-4 w-4" />
             ) : (
               <EyeOff className="h-4 w-4" />

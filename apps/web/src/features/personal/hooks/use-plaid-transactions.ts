@@ -4,23 +4,21 @@ import { useState, useEffect, useCallback } from 'react'
 
 export interface PlaidTransaction {
   id: string
-  transaction_id: string
-  account_id: string
+  transactionId: string
+  accountId: string
   amount: number
   date: string
   name: string | null
-  merchant_name: string | null
-  mapped_category: string | null
-  personal_expense_id: string | null
-  is_excluded: boolean
-  is_pending: boolean
-  plaid_accounts: {
-    name: string
-    mask: string | null
-    type: string
-    scope: 'personal' | 'business' | null
-    plaid_items: { institution_name: string } | null
-  }
+  merchantName: string | null
+  mappedCategory: string | null
+  personalExpenseId: string | null
+  isExcluded: boolean
+  isPending: boolean
+  accountName: string | null
+  accountMask: string | null
+  accountType: string | null
+  accountScope: 'personal' | 'business' | null
+  institutionName: string | null
 }
 
 interface UsePlaidTransactionsReturn {
@@ -96,12 +94,16 @@ export async function syncPlaidTransactions(itemId?: string): Promise<{ success:
 
 export async function updatePlaidTransaction(
   id: string,
-  updates: { is_excluded?: boolean; mapped_category?: string | null }
+  updates: { isExcluded?: boolean; mappedCategory?: string | null }
 ): Promise<{ success: boolean; error?: string }> {
+  // Route reads snake_case body fields
+  const body: Record<string, unknown> = { id }
+  if (updates.isExcluded !== undefined) body.is_excluded = updates.isExcluded
+  if (updates.mappedCategory !== undefined) body.mapped_category = updates.mappedCategory
   const response = await fetch('/api/personal/banking/transactions', {
     method: 'PATCH',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ id, ...updates }),
+    body: JSON.stringify(body),
   })
   return response.json()
 }

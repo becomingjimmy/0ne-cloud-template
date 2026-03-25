@@ -4,30 +4,30 @@ import { useState, useEffect, useCallback } from 'react'
 
 export interface PlaidAccount {
   id: string
-  item_id: string
-  account_id: string
+  itemId: string
+  accountId: string
   name: string
-  official_name: string | null
+  officialName: string | null
   type: string
   subtype: string | null
   mask: string | null
-  current_balance: number | null
-  available_balance: number | null
-  credit_limit: number | null
-  iso_currency_code: string
-  is_hidden: boolean
+  currentBalance: number | null
+  availableBalance: number | null
+  creditLimit: number | null
+  isoCurrencyCode: string
+  isHidden: boolean
   scope: 'personal' | 'business' | null
 }
 
 export interface PlaidItem {
   id: string
-  item_id: string
-  institution_id: string | null
-  institution_name: string | null
+  itemId: string
+  institutionId: string | null
+  institutionName: string | null
   status: string
-  error_code: string | null
-  last_synced_at: string | null
-  created_at: string
+  errorCode: string | null
+  lastSyncedAt: string | null
+  createdAt: string
   accounts: PlaidAccount[]
 }
 

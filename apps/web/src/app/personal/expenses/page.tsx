@@ -815,14 +815,14 @@ export default function PersonalExpensesPage() {
                           ),
                         },
                         {
-                          key: 'merchant_name',
+                          key: 'merchantName',
                           header: 'Name',
                           render: (value, row) => (
                             <div>
                               <span className="font-medium">
                                 {(value as string) || (row as unknown as PlaidTransaction).name || 'Unknown'}
                               </span>
-                              {(row as unknown as PlaidTransaction).is_pending && (
+                              {(row as unknown as PlaidTransaction).isPending && (
                                 <span className="ml-2 text-xs text-amber-600 font-medium">Pending</span>
                               )}
                             </div>
@@ -842,19 +842,19 @@ export default function PersonalExpensesPage() {
                           },
                         },
                         {
-                          key: 'plaid_accounts',
+                          key: 'accountName',
                           header: 'Account',
-                          render: (value) => {
-                            const acct = value as PlaidTransaction['plaid_accounts']
+                          render: (value, row) => {
+                            const txn = row as unknown as PlaidTransaction
                             return (
                               <span className="text-sm text-muted-foreground">
-                                {acct?.name || 'Unknown'}{acct?.mask ? ` ••${acct.mask}` : ''}
+                                {(value as string) || 'Unknown'}{txn.accountMask ? ` ••${txn.accountMask}` : ''}
                               </span>
                             )
                           },
                         },
                         {
-                          key: 'mapped_category',
+                          key: 'mappedCategory',
                           header: 'Category',
                           render: (value) => {
                             const cat = value as string | null
@@ -871,7 +871,7 @@ export default function PersonalExpensesPage() {
                           },
                         },
                         {
-                          key: 'personal_expense_id',
+                          key: 'personalExpenseId',
                           header: '',
                           align: 'right' as const,
                           sortable: false,

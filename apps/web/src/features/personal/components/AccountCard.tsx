@@ -59,9 +59,9 @@ export function AccountCard({ item, onUnlink, onAccountUpdate }: AccountCardProp
   const handleToggleHidden = async (account: PlaidAccount) => {
     setUpdatingAccounts((prev) => new Set(prev).add(account.id))
     try {
-      const result = await updateAccount(account.id, { is_hidden: !account.is_hidden })
+      const result = await updateAccount(account.id, { is_hidden: !account.isHidden })
       if (result.success) {
-        toast.success(account.is_hidden ? 'Account visible' : 'Account hidden')
+        toast.success(account.isHidden ? 'Account visible' : 'Account hidden')
         onAccountUpdate?.()
       } else {
         throw new Error(result.error)
@@ -111,10 +111,10 @@ export function AccountCard({ item, onUnlink, onAccountUpdate }: AccountCardProp
               <Building2 className="h-5 w-5 text-muted-foreground" />
             </div>
             <div>
-              <h3 className="font-semibold">{item.institution_name || 'Unknown Institution'}</h3>
+              <h3 className="font-semibold">{item.institutionName || 'Unknown Institution'}</h3>
               <p className="text-xs text-muted-foreground">
-                {item.last_synced_at
-                  ? `Last synced: ${new Date(item.last_synced_at).toLocaleDateString()}`
+                {item.lastSyncedAt
+                  ? `Last synced: ${new Date(item.lastSyncedAt).toLocaleDateString()}`
                   : 'Never synced'}
               </p>
             </div>
@@ -142,7 +142,7 @@ export function AccountCard({ item, onUnlink, onAccountUpdate }: AccountCardProp
             <span>
               {item.status === 'login_required'
                 ? 'Login required — please reconnect this account'
-                : `Error: ${item.error_code || item.status}`}
+                : `Error: ${item.errorCode || item.status}`}
             </span>
           </div>
         )}
@@ -157,7 +157,7 @@ export function AccountCard({ item, onUnlink, onAccountUpdate }: AccountCardProp
               <div
                 key={account.id}
                 className={`flex items-center justify-between rounded-lg border p-3 transition-opacity ${
-                  account.is_hidden ? 'opacity-50 bg-muted/30' : ''
+                  account.isHidden ? 'opacity-50 bg-muted/30' : ''
                 }`}
               >
                 <div className="flex items-center gap-3 min-w-0">
@@ -166,11 +166,11 @@ export function AccountCard({ item, onUnlink, onAccountUpdate }: AccountCardProp
                     onClick={() => handleToggleHidden(account)}
                     disabled={isUpdating}
                     className="shrink-0 text-muted-foreground hover:text-foreground transition-colors"
-                    title={account.is_hidden ? 'Show account' : 'Hide account'}
+                    title={account.isHidden ? 'Show account' : 'Hide account'}
                   >
                     {isUpdating ? (
                       <Loader2 className="h-4 w-4 animate-spin" />
-                    ) : account.is_hidden ? (
+                    ) : account.isHidden ? (
                       <EyeOff className="h-4 w-4" />
                     ) : (
                       <Eye className="h-4 w-4" />
@@ -211,16 +211,16 @@ export function AccountCard({ item, onUnlink, onAccountUpdate }: AccountCardProp
                   {/* Balance */}
                   <div className="text-right">
                     <div className="font-semibold text-sm">
-                      {formatBalance(account.current_balance)}
+                      {formatBalance(account.currentBalance)}
                     </div>
-                    {account.available_balance !== null && account.available_balance !== account.current_balance && (
+                    {account.availableBalance !== null && account.availableBalance !== account.currentBalance && (
                       <div className="text-xs text-muted-foreground">
-                        Available: {formatBalance(account.available_balance)}
+                        Available: {formatBalance(account.availableBalance)}
                       </div>
                     )}
-                    {account.type === 'credit' && account.credit_limit && (
+                    {account.type === 'credit' && account.creditLimit && (
                       <div className="text-xs text-muted-foreground">
-                        Limit: {formatBalance(account.credit_limit)}
+                        Limit: {formatBalance(account.creditLimit)}
                       </div>
                     )}
                   </div>
