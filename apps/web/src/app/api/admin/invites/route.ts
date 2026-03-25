@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { auth } from '@clerk/nextjs/server'
 import { getUserPermissions } from '@0ne/auth/permissions'
-import { createServerClient } from '@0ne/db/server'
+import { db, eq, and, desc } from '@0ne/db/server'
+import { invites } from '@0ne/db/server'
 
 export const dynamic = 'force-dynamic'
 
@@ -12,17 +13,16 @@ export async function GET() {
     return NextResponse.json({ error: 'Admin access required' }, { status: 403 })
   }
 
-  const supabase = createServerClient()
-  const { data, error } = await supabase
-    .from('invites')
-    .select('*')
-    .order('created_at', { ascending: false })
+  try {
+    const data = await db
+      .select()
+      .from(invites)
+      .orderBy(desc(invites.createdAt))
 
-  if (error) {
-    return NextResponse.json({ error: error.message }, { status: 500 })
+    return NextResponse.json({ invites: data })
+  } catch (error) {
+    return NextResponse.json({ error: String(error) }, { status: 500 })
   }
-
-  return NextResponse.json({ invites: data })
 }
 
 export async function POST(request: NextRequest) {
@@ -39,33 +39,28 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'Email is required' }, { status: 400 })
   }
 
-  const supabase = createServerClient()
+  try {
+    // Check for existing pending invite
+    const [existing] = await db
+      .select({ id: invites.id, status: invites.status })
+      .from(invites)
+      .where(and(eq(invites.email, email.toLowerCase()), eq(invites.status, 'pending')))
 
-  // Check for existing pending invite
-  const { data: existing } = await supabase
-    .from('invites')
-    .select('id, status')
-    .eq('email', email.toLowerCase())
-    .eq('status', 'pending')
-    .single()
+    if (existing) {
+      return NextResponse.json({ error: 'Pending invite already exists for this email' }, { status: 409 })
+    }
 
-  if (existing) {
-    return NextResponse.json({ error: 'Pending invite already exists for this email' }, { status: 409 })
+    const [data] = await db
+      .insert(invites)
+      .values({
+        email: email.toLowerCase(),
+        name: name || null,
+        source: source || 'manual',
+      })
+      .returning()
+
+    return NextResponse.json({ invite: data })
+  } catch (error) {
+    return NextResponse.json({ error: String(error) }, { status: 500 })
   }
-
-  const { data, error } = await supabase
-    .from('invites')
-    .insert({
-      email: email.toLowerCase(),
-      name: name || null,
-      source: source || 'manual',
-    })
-    .select()
-    .single()
-
-  if (error) {
-    return NextResponse.json({ error: error.message }, { status: 500 })
-  }
-
-  return NextResponse.json({ invite: data })
 }

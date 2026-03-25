@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { auth } from '@clerk/nextjs/server'
-import { createServerClient } from '@0ne/db/server'
+import { db, eq, and } from '@0ne/db/server'
+import { invites } from '@0ne/db/server'
 
 export async function POST(request: NextRequest) {
   const { userId } = await auth.protect()
@@ -11,21 +12,18 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'invite_token required' }, { status: 400 })
   }
 
-  const supabase = createServerClient()
+  try {
+    await db
+      .update(invites)
+      .set({
+        status: 'accepted',
+        clerkUserId: userId,
+        acceptedAt: new Date(),
+      })
+      .where(and(eq(invites.inviteToken, invite_token), eq(invites.status, 'pending')))
 
-  const { error } = await supabase
-    .from('invites')
-    .update({
-      status: 'accepted',
-      clerk_user_id: userId,
-      accepted_at: new Date().toISOString(),
-    })
-    .eq('invite_token', invite_token)
-    .eq('status', 'pending')
-
-  if (error) {
-    return NextResponse.json({ error: error.message }, { status: 500 })
+    return NextResponse.json({ success: true })
+  } catch (error) {
+    return NextResponse.json({ error: String(error) }, { status: 500 })
   }
-
-  return NextResponse.json({ success: true })
 }

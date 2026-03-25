@@ -1,37 +1,55 @@
 import { NextResponse } from 'next/server'
 import { auth } from '@clerk/nextjs/server'
-import { createServerClient } from '@0ne/db/server'
+import { db, eq } from '@0ne/db/server'
+import { userInstalls } from '@0ne/db/server'
 
 export const dynamic = 'force-dynamic'
 
 export async function GET() {
   const { userId } = await auth.protect()
-  const supabase = createServerClient()
 
-  const { data } = await supabase
-    .from('user_installs')
-    .select('install_token, status, platform, one_version, downloaded_at, connected_at, verified_at')
-    .eq('clerk_user_id', userId)
-    .single()
+  try {
+    const rows = await db
+      .select({
+        installToken: userInstalls.installToken,
+        status: userInstalls.status,
+        platform: userInstalls.platform,
+        oneVersion: userInstalls.oneVersion,
+        downloadedAt: userInstalls.downloadedAt,
+        connectedAt: userInstalls.connectedAt,
+        verifiedAt: userInstalls.verifiedAt,
+      })
+      .from(userInstalls)
+      .where(eq(userInstalls.clerkUserId, userId))
+      .limit(1)
 
-  if (!data) {
+    const data = rows[0]
+
+    if (!data) {
+      return NextResponse.json({
+        hasInstallToken: false,
+        hasDownloaded: false,
+        isConnected: false,
+        isVerified: false,
+        installToken: null,
+        platform: null,
+      })
+    }
+
     return NextResponse.json({
-      hasInstallToken: false,
-      hasDownloaded: false,
-      isConnected: false,
-      isVerified: false,
-      installToken: null,
-      platform: null,
+      hasInstallToken: true,
+      hasDownloaded: data.status !== 'pending',
+      isConnected: data.status === 'connected' || data.status === 'verified',
+      isVerified: data.status === 'verified',
+      installToken: data.installToken,
+      platform: data.platform,
+      oneVersion: data.oneVersion,
     })
+  } catch (error) {
+    console.error('[onboarding/status API] Error:', error)
+    return NextResponse.json(
+      { error: 'Internal server error', details: String(error) },
+      { status: 500 }
+    )
   }
-
-  return NextResponse.json({
-    hasInstallToken: true,
-    hasDownloaded: data.status !== 'pending',
-    isConnected: data.status === 'connected' || data.status === 'verified',
-    isVerified: data.status === 'verified',
-    installToken: data.install_token,
-    platform: data.platform,
-    oneVersion: data.one_version,
-  })
 }

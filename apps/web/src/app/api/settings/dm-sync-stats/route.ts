@@ -8,7 +8,8 @@
  */
 
 import { NextResponse } from 'next/server'
-import { createServerClient } from '@0ne/db/server'
+import { db, eq, and, gte, count } from '@0ne/db/server'
+import { dmMessages, dmContactMappings } from '@0ne/db/server'
 
 export const dynamic = 'force-dynamic'
 
@@ -21,59 +22,55 @@ interface DMSyncStats {
 
 export async function GET() {
   try {
-    const supabase = createServerClient()
-
     // Calculate 24 hours ago
-    const twentyFourHoursAgo = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString()
+    const twentyFourHoursAgo = new Date(Date.now() - 24 * 60 * 60 * 1000)
 
     // Run all queries in parallel
     const [inboundResult, outboundResult, mappingsResult, pendingResult] = await Promise.all([
       // Inbound messages in last 24h
-      supabase
-        .from('dm_messages')
-        .select('id', { count: 'exact', head: true })
-        .eq('direction', 'inbound')
-        .gte('created_at', twentyFourHoursAgo),
+      db
+        .select({ count: count() })
+        .from(dmMessages)
+        .where(
+          and(
+            eq(dmMessages.direction, 'inbound'),
+            gte(dmMessages.createdAt, twentyFourHoursAgo)
+          )
+        ),
 
       // Outbound messages in last 24h
-      supabase
-        .from('dm_messages')
-        .select('id', { count: 'exact', head: true })
-        .eq('direction', 'outbound')
-        .gte('created_at', twentyFourHoursAgo),
+      db
+        .select({ count: count() })
+        .from(dmMessages)
+        .where(
+          and(
+            eq(dmMessages.direction, 'outbound'),
+            gte(dmMessages.createdAt, twentyFourHoursAgo)
+          )
+        ),
 
       // Total contact mappings
-      supabase
-        .from('dm_contact_mappings')
-        .select('id', { count: 'exact', head: true }),
+      db
+        .select({ count: count() })
+        .from(dmContactMappings),
 
       // Pending outbound messages (status = 'pending')
-      supabase
-        .from('dm_messages')
-        .select('id', { count: 'exact', head: true })
-        .eq('direction', 'outbound')
-        .eq('status', 'pending'),
+      db
+        .select({ count: count() })
+        .from(dmMessages)
+        .where(
+          and(
+            eq(dmMessages.direction, 'outbound'),
+            eq(dmMessages.status, 'pending')
+          )
+        ),
     ])
 
-    // Check for errors
-    if (inboundResult.error) {
-      console.error('[dm-sync-stats API] Inbound query error:', inboundResult.error)
-    }
-    if (outboundResult.error) {
-      console.error('[dm-sync-stats API] Outbound query error:', outboundResult.error)
-    }
-    if (mappingsResult.error) {
-      console.error('[dm-sync-stats API] Mappings query error:', mappingsResult.error)
-    }
-    if (pendingResult.error) {
-      console.error('[dm-sync-stats API] Pending query error:', pendingResult.error)
-    }
-
     const stats: DMSyncStats = {
-      inbound24h: inboundResult.count ?? 0,
-      outbound24h: outboundResult.count ?? 0,
-      totalMappings: mappingsResult.count ?? 0,
-      pendingQueue: pendingResult.count ?? 0,
+      inbound24h: inboundResult[0]?.count ?? 0,
+      outbound24h: outboundResult[0]?.count ?? 0,
+      totalMappings: mappingsResult[0]?.count ?? 0,
+      pendingQueue: pendingResult[0]?.count ?? 0,
     }
 
     return NextResponse.json(stats)

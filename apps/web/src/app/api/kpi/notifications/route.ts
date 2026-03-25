@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { auth } from '@clerk/nextjs/server'
-import { createServerClient } from '@0ne/db/server'
+import { db, eq } from '@0ne/db/server'
+import { notificationPreferences } from '@0ne/db/server'
 import {
   type NotificationPreferences,
   type NotificationPreferencesInput,
@@ -22,29 +23,18 @@ export async function GET() {
   }
 
   try {
-    const supabase = createServerClient()
-
-    const { data, error } = await supabase
-      .from('notification_preferences')
-      .select('*')
-      .eq('clerk_user_id', userId)
-      .single()
-
-    if (error && error.code !== 'PGRST116') {
-      // PGRST116 = "no rows returned" - that's fine, we'll return defaults
-      console.error('Error fetching notification preferences:', error)
-      return NextResponse.json(
-        { error: 'Failed to fetch preferences' },
-        { status: 500 }
-      )
-    }
+    const [data] = await db
+      .select()
+      .from(notificationPreferences)
+      .where(eq(notificationPreferences.clerkUserId, userId))
+      .limit(1)
 
     // If no preferences exist, return defaults with the user ID
     const preferences: NotificationPreferences = data || {
-      clerk_user_id: userId,
+      clerkUserId: userId,
       ...DEFAULT_NOTIFICATION_PREFERENCES,
-      created_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
+      createdAt: new Date(),
+      updatedAt: new Date(),
     }
 
     return NextResponse.json({ preferences })
@@ -71,84 +61,86 @@ export async function PUT(request: Request) {
   try {
     const body = (await request.json()) as NotificationPreferencesInput
 
-    // Validate delivery_method if provided
-    if (body.delivery_method && !['email', 'sms', 'both'].includes(body.delivery_method)) {
+    // Validate deliveryMethod if provided
+    if (body.deliveryMethod && !['email', 'sms', 'both'].includes(body.deliveryMethod)) {
       return NextResponse.json(
-        { error: 'Invalid delivery_method. Must be email, sms, or both.' },
+        { error: 'Invalid deliveryMethod. Must be email, sms, or both.' },
         { status: 400 }
       )
     }
 
-    // Validate delivery_time format if provided (HH:MM:SS or HH:MM)
-    if (body.delivery_time) {
+    // Validate deliveryTime format if provided (HH:MM:SS or HH:MM)
+    if (body.deliveryTime) {
       const timeRegex = /^([01]?[0-9]|2[0-3]):[0-5][0-9](:[0-5][0-9])?$/
-      if (!timeRegex.test(body.delivery_time)) {
+      if (!timeRegex.test(body.deliveryTime)) {
         return NextResponse.json(
-          { error: 'Invalid delivery_time format. Use HH:MM or HH:MM:SS.' },
+          { error: 'Invalid deliveryTime format. Use HH:MM or HH:MM:SS.' },
           { status: 400 }
         )
       }
       // Normalize to HH:MM:SS format
-      if (body.delivery_time.length === 5) {
-        body.delivery_time = `${body.delivery_time}:00`
+      if (body.deliveryTime.length === 5) {
+        body.deliveryTime = `${body.deliveryTime}:00`
       }
     }
 
-    const supabase = createServerClient()
-
     // First, check if a record exists
-    const { data: existing } = await supabase
-      .from('notification_preferences')
-      .select('clerk_user_id, metrics_config')
-      .eq('clerk_user_id', userId)
-      .single()
+    const [existing] = await db
+      .select({
+        clerkUserId: notificationPreferences.clerkUserId,
+        metricsConfig: notificationPreferences.metricsConfig,
+      })
+      .from(notificationPreferences)
+      .where(eq(notificationPreferences.clerkUserId, userId))
+      .limit(1)
 
     // Build the upsert data
-    const upsertData: Partial<NotificationPreferences> & { clerk_user_id: string } = {
-      clerk_user_id: userId,
-      updated_at: new Date().toISOString(),
+    const upsertData: Record<string, unknown> = {
+      clerkUserId: userId,
+      updatedAt: new Date(),
     }
 
     // Only include fields that were provided
-    if (body.daily_snapshot_enabled !== undefined) {
-      upsertData.daily_snapshot_enabled = body.daily_snapshot_enabled
+    if (body.dailySnapshotEnabled !== undefined) {
+      upsertData.dailySnapshotEnabled = body.dailySnapshotEnabled
     }
-    if (body.delivery_time !== undefined) {
-      upsertData.delivery_time = body.delivery_time
+    if (body.deliveryTime !== undefined) {
+      upsertData.deliveryTime = body.deliveryTime
     }
-    if (body.delivery_email !== undefined) {
-      upsertData.delivery_email = body.delivery_email
+    if (body.deliveryEmail !== undefined) {
+      upsertData.deliveryEmail = body.deliveryEmail
     }
-    if (body.delivery_method !== undefined) {
-      upsertData.delivery_method = body.delivery_method
+    if (body.deliveryMethod !== undefined) {
+      upsertData.deliveryMethod = body.deliveryMethod
     }
-    if (body.metrics_config !== undefined) {
+    if (body.metricsConfig !== undefined) {
       // Merge with existing or default config
-      const existingConfig = existing?.metrics_config || DEFAULT_METRICS_CONFIG
-      upsertData.metrics_config = {
-        ...existingConfig,
-        ...body.metrics_config,
+      const existingConfig = existing?.metricsConfig || DEFAULT_METRICS_CONFIG
+      upsertData.metricsConfig = {
+        ...(existingConfig as Record<string, unknown>),
+        ...body.metricsConfig,
       }
     }
-    if (body.alert_thresholds !== undefined) {
-      upsertData.alert_thresholds = body.alert_thresholds
+    if (body.alertThresholds !== undefined) {
+      upsertData.alertThresholds = body.alertThresholds
     }
 
     // If creating new record, set created_at
     if (!existing) {
-      upsertData.created_at = new Date().toISOString()
+      upsertData.createdAt = new Date()
     }
 
-    const { data, error } = await supabase
-      .from('notification_preferences')
-      .upsert(upsertData, {
-        onConflict: 'clerk_user_id',
+    const [result] = await db
+      .insert(notificationPreferences)
+      .values(upsertData as typeof notificationPreferences.$inferInsert)
+      .onConflictDoUpdate({
+        target: notificationPreferences.clerkUserId,
+        set: upsertData as Record<string, unknown>,
       })
-      .select()
-      .single()
+      .returning()
 
-    if (error) {
-      console.error('Error upserting notification preferences:', error)
+    if (!result) {
+      console.error('Error upserting notification preferences: no row returned')
       return NextResponse.json(
         { error: 'Failed to update preferences' },
         { status: 500 }
@@ -157,7 +149,7 @@ export async function PUT(request: Request) {
 
     return NextResponse.json({
       success: true,
-      preferences: data,
+      preferences: result,
     })
   } catch (error) {
     console.error('Error in PUT /api/settings/notifications:', error)

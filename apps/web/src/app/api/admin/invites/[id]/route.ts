@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { auth } from '@clerk/nextjs/server'
 import { getUserPermissions } from '@0ne/auth/permissions'
-import { createServerClient } from '@0ne/db/server'
+import { db, eq } from '@0ne/db/server'
+import { invites } from '@0ne/db/server'
 
 export async function DELETE(
   _request: NextRequest,
@@ -14,16 +15,15 @@ export async function DELETE(
   }
 
   const { id } = await params
-  const supabase = createServerClient()
 
-  const { error } = await supabase
-    .from('invites')
-    .update({ status: 'revoked' })
-    .eq('id', id)
+  try {
+    await db
+      .update(invites)
+      .set({ status: 'revoked' })
+      .where(eq(invites.id, id))
 
-  if (error) {
-    return NextResponse.json({ error: error.message }, { status: 500 })
+    return NextResponse.json({ success: true })
+  } catch (error) {
+    return NextResponse.json({ error: String(error) }, { status: 500 })
   }
-
-  return NextResponse.json({ success: true })
 }

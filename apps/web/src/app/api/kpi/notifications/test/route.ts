@@ -7,7 +7,8 @@
 
 import { NextResponse } from 'next/server'
 import { auth, currentUser } from '@clerk/nextjs/server'
-import { createServerClient } from '@0ne/db/server'
+import { db, eq } from '@0ne/db/server'
+import { notificationPreferences } from '@0ne/db/server'
 import { sendDailySnapshot } from '@/features/notifications/lib/send-notification'
 import type { DeliveryMethod } from '@0ne/db/types'
 
@@ -33,30 +34,33 @@ export async function POST(request: Request) {
     }
 
     // Get user's email from Clerk if no delivery_email is set
-    const supabase = createServerClient()
-    const { data: prefs } = await supabase
-      .from('notification_preferences')
-      .select('delivery_email')
-      .eq('clerk_user_id', userId)
-      .single()
+    const [prefs] = await db
+      .select({ deliveryEmail: notificationPreferences.deliveryEmail })
+      .from(notificationPreferences)
+      .where(eq(notificationPreferences.clerkUserId, userId))
+      .limit(1)
 
     // If no delivery email in preferences, try to get from Clerk
-    if (!prefs?.delivery_email) {
+    if (!prefs?.deliveryEmail) {
       const user = await currentUser()
       const primaryEmail = user?.emailAddresses[0]?.emailAddress
 
       if (primaryEmail) {
         // Temporarily set the delivery email for this test
-        await supabase
-          .from('notification_preferences')
-          .upsert(
-            {
-              clerk_user_id: userId,
-              delivery_email: primaryEmail,
-              updated_at: new Date().toISOString(),
+        await db
+          .insert(notificationPreferences)
+          .values({
+            clerkUserId: userId,
+            deliveryEmail: primaryEmail,
+            updatedAt: new Date(),
+          })
+          .onConflictDoUpdate({
+            target: notificationPreferences.clerkUserId,
+            set: {
+              deliveryEmail: primaryEmail,
+              updatedAt: new Date(),
             },
-            { onConflict: 'clerk_user_id' }
-          )
+          })
       }
     }
 

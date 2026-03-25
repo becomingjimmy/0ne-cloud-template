@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
-import { createServerClient } from '@0ne/db/server'
+import { db, eq, and, gte, lte } from '@0ne/db/server'
+import { plaidAccounts, personalExpenses } from '@0ne/db/server'
 
 export const dynamic = 'force-dynamic'
 
@@ -18,18 +19,25 @@ export async function GET(request: Request) {
   }
 
   try {
-    const supabase = createServerClient()
-
     // 1. Cash on hand: personal-scoped, non-hidden depository accounts
-    const { data: accounts } = await supabase
-      .from('plaid_accounts')
-      .select('available_balance, current_balance, type, subtype')
-      .eq('is_hidden', false)
-      .eq('scope', 'personal')
-      .eq('type', 'depository')
+    const accounts = await db
+      .select({
+        availableBalance: plaidAccounts.availableBalance,
+        currentBalance: plaidAccounts.currentBalance,
+        type: plaidAccounts.type,
+        subtype: plaidAccounts.subtype,
+      })
+      .from(plaidAccounts)
+      .where(
+        and(
+          eq(plaidAccounts.isHidden, false),
+          eq(plaidAccounts.scope, 'personal'),
+          eq(plaidAccounts.type, 'depository')
+        )
+      )
 
-    const cashOnHand = (accounts || []).reduce(
-      (sum, a) => sum + (a.available_balance ?? a.current_balance ?? 0),
+    const cashOnHand = accounts.reduce(
+      (sum, a) => sum + (Number(a.availableBalance) || Number(a.currentBalance) || 0),
       0
     )
 
@@ -37,21 +45,31 @@ export async function GET(request: Request) {
     //    Query current month expenses, sum amounts, divide by month count
     const now = new Date()
     const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1)
-      .toISOString().split('T')[0]
-    const today = now.toISOString().split('T')[0]
+      .toISOString().split('T')[0]!
+    const today = now.toISOString().split('T')[0]!
 
-    const { data: expenses } = await supabase
-      .from('personal_expenses')
-      .select('amount, category, expense_date')
-      .gte('expense_date', startOfMonth)
-      .lte('expense_date', today)
+    const expenses = await db
+      .select({
+        amount: personalExpenses.amount,
+        category: personalExpenses.category,
+        expenseDate: personalExpenses.expenseDate,
+      })
+      .from(personalExpenses)
+      .where(
+        and(
+          gte(personalExpenses.expenseDate, startOfMonth),
+          lte(personalExpenses.expenseDate, today)
+        )
+      )
 
     // Group by month to get month count (matches expenses API logic)
     const months = new Set<string>()
     let totalExpenses = 0
-    for (const exp of expenses || []) {
+    for (const exp of expenses) {
       totalExpenses += Number(exp.amount) || 0
-      months.add(exp.expense_date.substring(0, 7))
+      if (exp.expenseDate) {
+        months.add(exp.expenseDate.substring(0, 7))
+      }
     }
     const monthCount = Math.max(months.size, 1)
     const monthlyBurnRate = totalExpenses / monthCount

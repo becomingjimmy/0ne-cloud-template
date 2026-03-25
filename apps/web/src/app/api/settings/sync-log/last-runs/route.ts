@@ -9,7 +9,8 @@
  */
 
 import { NextResponse } from 'next/server'
-import { createServerClient } from '@0ne/db/server'
+import { db, desc, inArray } from '@0ne/db/server'
+import { syncActivityLog } from '@0ne/db/server'
 import type { SyncType, SyncStatus } from '@/lib/sync-log'
 
 export const dynamic = 'force-dynamic'
@@ -31,32 +32,22 @@ const SYNC_TYPES: SyncType[] = [
 ]
 
 interface LastRunInfo {
-  startedAt: string
+  startedAt: Date | null
   status: SyncStatus
-  recordsSynced: number
+  recordsSynced: number | null
   durationSeconds: number | null
   errorMessage: string | null
 }
 
 export async function GET() {
   try {
-    const supabase = createServerClient()
-
     // For each sync type, get the most recent entry
     // We use a subquery to get distinct on sync_type ordered by started_at desc
-    const { data, error } = await supabase
-      .from('sync_activity_log')
-      .select('*')
-      .in('sync_type', SYNC_TYPES)
-      .order('started_at', { ascending: false })
-
-    if (error) {
-      console.error('[last-runs API] Query error:', error)
-      return NextResponse.json(
-        { error: 'Failed to fetch last runs', details: error.message },
-        { status: 500 }
-      )
-    }
+    const data = await db
+      .select()
+      .from(syncActivityLog)
+      .where(inArray(syncActivityLog.syncType, SYNC_TYPES))
+      .orderBy(desc(syncActivityLog.startedAt))
 
     // Group by sync_type and take the first (most recent) entry for each
     const lastRunsMap: Record<SyncType, LastRunInfo | null> = {} as Record<SyncType, LastRunInfo | null>
@@ -69,22 +60,22 @@ export async function GET() {
     // Process results - first occurrence of each sync_type is the most recent
     const seenTypes = new Set<string>()
     for (const row of data || []) {
-      const syncType = row.sync_type as SyncType
+      const syncType = row.syncType as SyncType
       if (!seenTypes.has(syncType)) {
         seenTypes.add(syncType)
         lastRunsMap[syncType] = {
-          startedAt: row.started_at,
+          startedAt: row.startedAt,
           status: row.status as SyncStatus,
-          recordsSynced: row.records_synced,
+          recordsSynced: row.recordsSynced,
           durationSeconds:
-            row.completed_at && row.started_at
+            row.completedAt && row.startedAt
               ? Math.round(
-                  (new Date(row.completed_at).getTime() -
-                    new Date(row.started_at).getTime()) /
+                  (new Date(row.completedAt).getTime() -
+                    new Date(row.startedAt).getTime()) /
                     1000
                 )
               : null,
-          errorMessage: row.error_message,
+          errorMessage: row.errorMessage,
         }
       }
     }

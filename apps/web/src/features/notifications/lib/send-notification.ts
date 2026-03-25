@@ -5,12 +5,14 @@
  * based on user preferences.
  */
 
-import { createServerClient } from '@0ne/db/server'
+import { db, eq, and, like } from '@0ne/db/server'
+import { notificationPreferences } from '@0ne/db/server'
 import type {
   NotificationPreferences,
   DeliveryMethod,
-  DEFAULT_METRICS_CONFIG,
+  MetricsConfig,
 } from '@0ne/db/types/notifications'
+import { DEFAULT_METRICS_CONFIG } from '@0ne/db/types/notifications'
 import { ghlClient } from '@/features/kpi/lib/ghl-client'
 import { generateDailySnapshot, type FormattedSnapshot } from './generate-snapshot'
 
@@ -46,20 +48,22 @@ export interface NotificationResult {
 async function getUserPreferences(
   userId: string
 ): Promise<NotificationPreferences | null> {
-  const supabase = createServerClient()
+  try {
+    const [data] = await db
+      .select()
+      .from(notificationPreferences)
+      .where(eq(notificationPreferences.clerkUserId, userId))
+      .limit(1)
 
-  const { data, error } = await supabase
-    .from('notification_preferences')
-    .select('*')
-    .eq('clerk_user_id', userId)
-    .single()
+    if (!data) {
+      return null
+    }
 
-  if (error) {
+    return data as unknown as NotificationPreferences
+  } catch (error) {
     console.error('[notifications] Failed to fetch preferences:', error)
     return null
   }
-
-  return data as NotificationPreferences
 }
 
 /**
@@ -142,7 +146,7 @@ export async function sendDailySnapshot(
       }
     }
 
-    if (!preferences.daily_snapshot_enabled && !methodOverride) {
+    if (!preferences.dailySnapshotEnabled && !methodOverride) {
       return {
         userId,
         success: false,
@@ -152,10 +156,10 @@ export async function sendDailySnapshot(
     }
 
     // 2. Determine delivery method
-    const method = methodOverride || preferences.delivery_method
+    const method = methodOverride || preferences.deliveryMethod
 
     // 3. Get delivery email (fallback to user's primary email would need Clerk lookup)
-    const deliveryEmail = preferences.delivery_email
+    const deliveryEmail = preferences.deliveryEmail
     if (!deliveryEmail) {
       return {
         userId,
@@ -177,7 +181,7 @@ export async function sendDailySnapshot(
     }
 
     // 5. Generate snapshot
-    const snapshot = await generateDailySnapshot(preferences.metrics_config)
+    const snapshot = await generateDailySnapshot(preferences.metricsConfig as MetricsConfig)
 
     // 6. Send based on method
     const results: SendResult[] = []
@@ -239,36 +243,38 @@ export async function sendDailySnapshot(
 export async function sendScheduledSnapshots(
   currentHour: number
 ): Promise<NotificationResult[]> {
-  const supabase = createServerClient()
+  try {
+    // Find users with notifications enabled and matching delivery time
+    const hourStr = currentHour.toString().padStart(2, '0')
+    const eligibleUsers = await db
+      .select({ clerkUserId: notificationPreferences.clerkUserId })
+      .from(notificationPreferences)
+      .where(
+        and(
+          eq(notificationPreferences.dailySnapshotEnabled, true),
+          like(notificationPreferences.deliveryTime, `${hourStr}:%`)
+        )
+      )
 
-  // Find users with notifications enabled and matching delivery time
-  const hourStr = currentHour.toString().padStart(2, '0')
-  const { data: eligibleUsers, error } = await supabase
-    .from('notification_preferences')
-    .select('clerk_user_id')
-    .eq('daily_snapshot_enabled', true)
-    .like('delivery_time', `${hourStr}:%`)
+    if (eligibleUsers.length === 0) {
+      console.log(`[notifications] No users scheduled for hour ${hourStr}`)
+      return []
+    }
 
-  if (error) {
+    console.log(
+      `[notifications] Sending snapshots to ${eligibleUsers.length} users at ${hourStr}:00`
+    )
+
+    // Send to each user
+    const results = await Promise.all(
+      eligibleUsers.map((user) => sendDailySnapshot(user.clerkUserId))
+    )
+
+    return results
+  } catch (error) {
     console.error('[notifications] Failed to fetch scheduled users:', error)
     return []
   }
-
-  if (!eligibleUsers || eligibleUsers.length === 0) {
-    console.log(`[notifications] No users scheduled for hour ${hourStr}`)
-    return []
-  }
-
-  console.log(
-    `[notifications] Sending snapshots to ${eligibleUsers.length} users at ${hourStr}:00`
-  )
-
-  // Send to each user
-  const results = await Promise.all(
-    eligibleUsers.map((user) => sendDailySnapshot(user.clerk_user_id))
-  )
-
-  return results
 }
 
 /**

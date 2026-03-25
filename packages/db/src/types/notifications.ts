@@ -45,18 +45,18 @@ export interface AlertThresholds {
 }
 
 /**
- * User notification preferences (database row)
+ * User notification preferences (database row — camelCase from Drizzle)
  */
 export interface NotificationPreferences {
-  clerk_user_id: string
-  daily_snapshot_enabled: boolean
-  delivery_time: string // TIME format: 'HH:MM:SS'
-  delivery_email: string | null
-  delivery_method: DeliveryMethod
-  metrics_config: MetricsConfig
-  alert_thresholds: AlertThresholds
-  created_at: string
-  updated_at: string
+  clerkUserId: string
+  dailySnapshotEnabled: boolean | null
+  deliveryTime: string | null
+  deliveryEmail: string | null
+  deliveryMethod: string | null
+  metricsConfig: MetricsConfig | unknown
+  alertThresholds: AlertThresholds | unknown
+  createdAt: Date | null
+  updatedAt: Date | null
 }
 
 /**
@@ -64,12 +64,12 @@ export interface NotificationPreferences {
  * All fields optional except user_id (which comes from auth)
  */
 export interface NotificationPreferencesInput {
-  daily_snapshot_enabled?: boolean
-  delivery_time?: string
-  delivery_email?: string | null
-  delivery_method?: DeliveryMethod
-  metrics_config?: Partial<MetricsConfig>
-  alert_thresholds?: AlertThresholds
+  dailySnapshotEnabled?: boolean
+  deliveryTime?: string
+  deliveryEmail?: string | null
+  deliveryMethod?: DeliveryMethod
+  metricsConfig?: Partial<MetricsConfig>
+  alertThresholds?: AlertThresholds
 }
 
 /**
@@ -89,11 +89,11 @@ export const DEFAULT_METRICS_CONFIG: MetricsConfig = {
 /**
  * Default notification preferences for new users
  */
-export const DEFAULT_NOTIFICATION_PREFERENCES: Omit<NotificationPreferences, 'clerk_user_id' | 'created_at' | 'updated_at'> = {
-  daily_snapshot_enabled: false,
-  delivery_time: '08:00:00',
-  delivery_email: null,
-  delivery_method: 'email',
-  metrics_config: DEFAULT_METRICS_CONFIG,
-  alert_thresholds: {},
+export const DEFAULT_NOTIFICATION_PREFERENCES: Omit<NotificationPreferences, 'clerkUserId' | 'createdAt' | 'updatedAt'> = {
+  dailySnapshotEnabled: false,
+  deliveryTime: '08:00:00',
+  deliveryEmail: null,
+  deliveryMethod: 'email',
+  metricsConfig: DEFAULT_METRICS_CONFIG,
+  alertThresholds: {},
 }

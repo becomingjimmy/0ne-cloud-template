@@ -9,7 +9,8 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server'
-import { createServerClient } from '@0ne/db/server'
+import { db, eq } from '@0ne/db/server'
+import { telemetryEvents, telemetryFailurePatterns, userInstalls } from '@0ne/db/server'
 
 export const dynamic = 'force-dynamic'
 
@@ -175,8 +176,6 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    const supabase = createServerClient()
-
     // Build fix_summary from fix_actions if present
     const fixSummary: FixSummary | null = body.fix_actions && body.fix_actions.length > 0
       ? {
@@ -195,44 +194,43 @@ export async function POST(request: NextRequest) {
     // Resolve cloud user from install token if provided
     let cloudUserId: string | null = null
     if (body.install_token) {
-      const { data: installRecord } = await supabase
-        .from('user_installs')
-        .select('clerk_user_id')
-        .eq('install_token', body.install_token)
-        .single()
+      const [installRecord] = await db
+        .select({ clerkUserId: userInstalls.clerkUserId })
+        .from(userInstalls)
+        .where(eq(userInstalls.installToken, body.install_token))
+        .limit(1)
 
       if (installRecord) {
-        cloudUserId = installRecord.clerk_user_id
+        cloudUserId = installRecord.clerkUserId
       }
     }
 
     const row = {
-      event_type: body.event_type,
+      eventType: body.event_type,
       platform: body.platform || null,
       arch: body.arch || null,
-      os_version: body.os_version || null,
-      bun_version: body.bun_version || null,
-      one_version: body.one_version || null,
-      principal_name: body.principal_name || null,
-      cloud_user_id: cloudUserId,
-      install_token: body.install_token || null,
+      osVersion: body.os_version || null,
+      bunVersion: body.bun_version || null,
+      oneVersion: body.one_version || null,
+      principalName: body.principal_name || null,
+      cloudUserId,
+      installToken: body.install_token || null,
       results: body.results,
       summary: body.summary || null,
-      system_info: body.system_info || null,
-      fix_actions: body.fix_actions || null,
-      fix_summary: fixSummary,
+      systemInfo: body.system_info || null,
+      fixActions: body.fix_actions || null,
+      fixSummary,
     }
 
-    const { data, error } = await supabase
-      .from('telemetry_events')
-      .insert(row)
-      .select('id')
-      .single()
+    const [inserted] = await db
+      .insert(telemetryEvents)
+      .values(row)
+      .returning({ id: telemetryEvents.id })
 
-    if (error) {
-      console.error('[Telemetry API] Insert error:', error)
+    if (!inserted) {
+      console.error('[Telemetry API] Insert returned no rows')
       return NextResponse.json(
-        { success: false, error: error.message },
+        { success: false, error: 'Insert failed' },
         { status: 500, headers: corsHeaders }
       )
     }
@@ -246,21 +244,21 @@ export async function POST(request: NextRequest) {
       const doctorPassed = isDoctor && body.summary &&
         (body.summary as Record<string, number>).fail === 0
 
-      await supabase
-        .from('user_installs')
-        .update({
+      await db
+        .update(userInstalls)
+        .set({
           status: doctorPassed ? 'verified' : 'connected',
           platform: body.platform || null,
           arch: body.arch || null,
-          os_version: body.os_version || null,
-          bun_version: body.bun_version || null,
-          one_version: body.one_version || null,
-          principal_name: body.principal_name || null,
-          connected_at: new Date().toISOString(),
-          ...(doctorPassed ? { verified_at: new Date().toISOString() } : {}),
-          updated_at: new Date().toISOString(),
+          osVersion: body.os_version || null,
+          bunVersion: body.bun_version || null,
+          oneVersion: body.one_version || null,
+          principalName: body.principal_name || null,
+          connectedAt: new Date(),
+          ...(doctorPassed ? { verifiedAt: new Date() } : {}),
+          updatedAt: new Date(),
         })
-        .eq('install_token', body.install_token)
+        .where(eq(userInstalls.installToken, body.install_token))
     }
 
     // =============================================
@@ -272,47 +270,51 @@ export async function POST(request: NextRequest) {
     const failures = extractFailures(body.event_type, body.results)
 
     if (failures.length > 0) {
-      const now = new Date().toISOString()
+      const now = new Date()
 
       // Upsert each failure pattern
       for (const failure of failures) {
         // Try to fetch existing pattern first
-        const { data: existing } = await supabase
-          .from('telemetry_failure_patterns')
-          .select('id, occurrence_count, known_fix')
-          .eq('pattern_key', failure.pattern_key)
-          .single()
+        const [existing] = await db
+          .select({
+            id: telemetryFailurePatterns.id,
+            occurrenceCount: telemetryFailurePatterns.occurrenceCount,
+            knownFix: telemetryFailurePatterns.knownFix,
+          })
+          .from(telemetryFailurePatterns)
+          .where(eq(telemetryFailurePatterns.patternKey, failure.pattern_key))
+          .limit(1)
 
         if (existing) {
           // Increment count and update last_seen
-          await supabase
-            .from('telemetry_failure_patterns')
-            .update({
-              occurrence_count: existing.occurrence_count + 1,
-              last_seen: now,
-              updated_at: now,
+          await db
+            .update(telemetryFailurePatterns)
+            .set({
+              occurrenceCount: (existing.occurrenceCount || 0) + 1,
+              lastSeen: now,
+              updatedAt: now,
             })
-            .eq('id', existing.id)
+            .where(eq(telemetryFailurePatterns.id, existing.id))
 
           // Collect known fix if available
-          if (existing.known_fix) {
+          if (existing.knownFix) {
             knownFixes.push({
               failure: failure.failure_name,
-              fix: existing.known_fix,
+              fix: existing.knownFix,
             })
           }
         } else {
           // Insert new pattern
-          await supabase
-            .from('telemetry_failure_patterns')
-            .insert({
-              pattern_key: failure.pattern_key,
-              failure_name: failure.failure_name,
+          await db
+            .insert(telemetryFailurePatterns)
+            .values({
+              patternKey: failure.pattern_key,
+              failureName: failure.failure_name,
               category: failure.category,
-              occurrence_count: 1,
-              first_seen: now,
-              last_seen: now,
-              updated_at: now,
+              occurrenceCount: 1,
+              firstSeen: now,
+              lastSeen: now,
+              updatedAt: now,
             })
         }
       }
@@ -330,21 +332,24 @@ export async function POST(request: NextRequest) {
           const patternKey = `doctor:${category}:${nameSafe}`
 
           // Look up matching pattern in telemetry_failure_patterns
-          const { data: pattern } = await supabase
-            .from('telemetry_failure_patterns')
-            .select('id, known_fix')
-            .eq('pattern_key', patternKey)
-            .single()
+          const [pattern] = await db
+            .select({
+              id: telemetryFailurePatterns.id,
+              knownFix: telemetryFailurePatterns.knownFix,
+            })
+            .from(telemetryFailurePatterns)
+            .where(eq(telemetryFailurePatterns.patternKey, patternKey))
+            .limit(1)
 
           // If pattern exists and has no known_fix yet, teach it
-          if (pattern && !pattern.known_fix) {
-            await supabase
-              .from('telemetry_failure_patterns')
-              .update({
-                known_fix: fa.action_taken,
-                updated_at: new Date().toISOString(),
+          if (pattern && !pattern.knownFix) {
+            await db
+              .update(telemetryFailurePatterns)
+              .set({
+                knownFix: fa.action_taken,
+                updatedAt: new Date(),
               })
-              .eq('id', pattern.id)
+              .where(eq(telemetryFailurePatterns.id, pattern.id))
           }
         }
       }
@@ -353,7 +358,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json(
       {
         success: true,
-        id: data.id,
+        id: inserted.id,
         known_fixes: knownFixes.length > 0 ? knownFixes : undefined,
       },
       { headers: corsHeaders }

@@ -1,24 +1,32 @@
 import { NextResponse } from 'next/server'
 import { auth } from '@clerk/nextjs/server'
-import { createServerClient } from '@0ne/db/server'
+import { db, eq, and } from '@0ne/db/server'
+import { userInstalls } from '@0ne/db/server'
 
 export async function POST() {
   const { userId } = await auth.protect()
-  const supabase = createServerClient()
 
-  const { error } = await supabase
-    .from('user_installs')
-    .update({
-      status: 'downloaded',
-      downloaded_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
-    })
-    .eq('clerk_user_id', userId)
-    .eq('status', 'pending')
+  try {
+    await db
+      .update(userInstalls)
+      .set({
+        status: 'downloaded',
+        downloadedAt: new Date(),
+        updatedAt: new Date(),
+      })
+      .where(
+        and(
+          eq(userInstalls.clerkUserId, userId),
+          eq(userInstalls.status, 'pending')
+        )
+      )
 
-  if (error) {
-    return NextResponse.json({ error: error.message }, { status: 500 })
+    return NextResponse.json({ success: true })
+  } catch (error) {
+    console.error('[onboarding/mark-downloaded API] Error:', error)
+    return NextResponse.json(
+      { error: 'Internal server error', details: String(error) },
+      { status: 500 }
+    )
   }
-
-  return NextResponse.json({ success: true })
 }

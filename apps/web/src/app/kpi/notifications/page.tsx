@@ -93,16 +93,17 @@ export default function NotificationsSettingsPage() {
         const data = await response.json()
         const prefs: NotificationPreferences = data.preferences
 
-        setEnabled(prefs.daily_snapshot_enabled)
-        setDeliveryTime(prefs.delivery_time)
-        setDeliveryEmail(prefs.delivery_email || user?.emailAddresses[0]?.emailAddress || '')
-        setDeliveryMethod(prefs.delivery_method)
-        setMetricsConfig(prefs.metrics_config)
-        setAlertThresholds(prefs.alert_thresholds || {})
+        setEnabled(prefs.dailySnapshotEnabled ?? false)
+        setDeliveryTime(prefs.deliveryTime ?? '08:00:00')
+        setDeliveryEmail(prefs.deliveryEmail || user?.emailAddresses[0]?.emailAddress || '')
+        setDeliveryMethod((prefs.deliveryMethod ?? 'email') as DeliveryMethod)
+        setMetricsConfig(prefs.metricsConfig as MetricsConfig)
+        const thresholds = (prefs.alertThresholds || {}) as AlertThresholds
+        setAlertThresholds(thresholds)
 
         // Parse thresholds for form
-        if (prefs.alert_thresholds?.revenue?.min !== undefined) {
-          setRevenueThreshold(prefs.alert_thresholds.revenue.min?.toString() || '')
+        if (thresholds?.revenue?.min !== undefined) {
+          setRevenueThreshold(thresholds.revenue.min?.toString() || '')
         }
         // We don't have a leads days threshold in the current schema, but we can add it
       } catch (err) {
@@ -132,12 +133,12 @@ export default function NotificationsSettingsPage() {
       }
 
       const body = {
-        daily_snapshot_enabled: enabled,
-        delivery_time: deliveryTime,
-        delivery_email: deliveryEmail || null,
-        delivery_method: deliveryMethod,
-        metrics_config: metricsConfig,
-        alert_thresholds: thresholds,
+        dailySnapshotEnabled: enabled,
+        deliveryTime: deliveryTime,
+        deliveryEmail: deliveryEmail || null,
+        deliveryMethod: deliveryMethod,
+        metricsConfig: metricsConfig,
+        alertThresholds: thresholds,
       }
 
       const response = await fetch('/api/kpi/notifications', {

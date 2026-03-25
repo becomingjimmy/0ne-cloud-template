@@ -497,6 +497,15 @@ export class GhlConversationProviderClient {
  * GHL signs webhooks using the marketplace webhook secret.
  * The signature is sent in the X-GHL-Signature header.
  *
+ * NOTE: Currently unused — our Conversation Provider webhooks don't include
+ * signatures (by GHL design). This exists for standard GHL webhooks if we
+ * add them later.
+ *
+ * TODO (by July 1, 2026): GHL is deprecating X-WH-Signature (SHA-256) in
+ * favor of X-GHL-Signature (ED25519). If we start using signature verification,
+ * update this function to use ED25519 instead of HMAC-SHA256.
+ * Ref: https://marketplace.gohighlevel.com/docs/webhook/WebhookIntegrationGuide/
+ *
  * @param payload - Raw request body as string
  * @param signature - Signature from X-GHL-Signature header
  * @param secret - Webhook secret (GHL_MARKETPLACE_WEBHOOK_SECRET)

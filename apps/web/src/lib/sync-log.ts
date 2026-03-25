@@ -5,7 +5,8 @@
  * to the unified sync_activity_log table.
  */
 
-import { createServerClient } from '@0ne/db/server'
+import { db, eq } from '@0ne/db/server'
+import { syncActivityLog } from '@0ne/db/server'
 
 export type SyncType =
   | 'ghl_contacts'
@@ -48,27 +49,24 @@ export async function startSyncLog(
   metadata?: Record<string, unknown>
 ): Promise<StartSyncResult | null> {
   try {
-    const supabase = createServerClient()
-
-    const { data, error } = await supabase
-      .from('sync_activity_log')
-      .insert({
-        sync_type: syncType,
-        started_at: new Date().toISOString(),
+    const [row] = await db
+      .insert(syncActivityLog)
+      .values({
+        syncType,
+        startedAt: new Date(),
         status: 'running' as SyncStatus,
         metadata: metadata || null,
       })
-      .select('id, started_at')
-      .single()
+      .returning({ id: syncActivityLog.id, startedAt: syncActivityLog.startedAt })
 
-    if (error) {
-      console.error(`[sync-log] Failed to create sync log for ${syncType}:`, error)
+    if (!row) {
+      console.error(`[sync-log] Failed to create sync log for ${syncType}: no row returned`)
       return null
     }
 
     return {
-      id: data.id,
-      startedAt: new Date(data.started_at),
+      id: row.id,
+      startedAt: row.startedAt ? new Date(row.startedAt) : new Date(),
     }
   } catch (err) {
     console.error(`[sync-log] Error creating sync log for ${syncType}:`, err)
@@ -85,27 +83,20 @@ export async function completeSyncLog(
   metadata?: Record<string, unknown>
 ): Promise<boolean> {
   try {
-    const supabase = createServerClient()
-
     const updateData: Record<string, unknown> = {
-      completed_at: new Date().toISOString(),
+      completedAt: new Date(),
       status: 'completed' as SyncStatus,
-      records_synced: recordsSynced,
+      recordsSynced,
     }
 
     if (metadata) {
       updateData.metadata = metadata
     }
 
-    const { error } = await supabase
-      .from('sync_activity_log')
-      .update(updateData)
-      .eq('id', logId)
-
-    if (error) {
-      console.error(`[sync-log] Failed to complete sync log ${logId}:`, error)
-      return false
-    }
+    await db
+      .update(syncActivityLog)
+      .set(updateData)
+      .where(eq(syncActivityLog.id, logId))
 
     return true
   } catch (err) {
@@ -123,22 +114,15 @@ export async function failSyncLog(
   recordsSynced?: number
 ): Promise<boolean> {
   try {
-    const supabase = createServerClient()
-
-    const { error } = await supabase
-      .from('sync_activity_log')
-      .update({
-        completed_at: new Date().toISOString(),
+    await db
+      .update(syncActivityLog)
+      .set({
+        completedAt: new Date(),
         status: 'failed' as SyncStatus,
-        records_synced: recordsSynced ?? 0,
-        error_message: errorMessage.slice(0, 1000), // Truncate long errors
+        recordsSynced: recordsSynced ?? 0,
+        errorMessage: errorMessage.slice(0, 1000), // Truncate long errors
       })
-      .eq('id', logId)
-
-    if (error) {
-      console.error(`[sync-log] Failed to mark sync log ${logId} as failed:`, error)
-      return false
-    }
+      .where(eq(syncActivityLog.id, logId))
 
     return true
   } catch (err) {

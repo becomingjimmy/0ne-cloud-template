@@ -13,7 +13,8 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server'
-import { createServerClient } from '@0ne/db/server'
+import { db, eq, desc, and, lt } from '@0ne/db/server'
+import { syncActivityLog } from '@0ne/db/server'
 import type { SyncType, SyncStatus } from '@/lib/sync-log'
 
 export const dynamic = 'force-dynamic'
@@ -39,7 +40,6 @@ const VALID_STATUSES: SyncStatus[] = ['running', 'completed', 'failed']
 
 export async function GET(request: NextRequest) {
   try {
-    const supabase = createServerClient()
     const { searchParams } = new URL(request.url)
 
     // Parse query parameters
@@ -72,47 +72,37 @@ export async function GET(request: NextRequest) {
       )
     }
 
-    // Build query
-    let query = supabase
-      .from('sync_activity_log')
-      .select('*')
-      .order('started_at', { ascending: false })
-      .limit(limit)
-
-    // Apply type filter if provided
+    // Build where conditions
+    const conditions = []
     if (typeFilter) {
-      query = query.eq('sync_type', typeFilter)
+      conditions.push(eq(syncActivityLog.syncType, typeFilter))
     }
-
-    // Apply status filter if provided
     if (statusFilter) {
-      query = query.eq('status', statusFilter)
+      conditions.push(eq(syncActivityLog.status, statusFilter))
     }
 
-    const { data, error } = await query
-
-    if (error) {
-      console.error('[sync-log API] Query error:', error)
-      return NextResponse.json(
-        { error: 'Failed to fetch sync logs', details: error.message },
-        { status: 500 }
-      )
-    }
+    // Build query
+    const data = await db
+      .select()
+      .from(syncActivityLog)
+      .where(conditions.length > 0 ? and(...conditions) : undefined)
+      .orderBy(desc(syncActivityLog.startedAt))
+      .limit(limit)
 
     // Transform data for response
     const logs = (data || []).map((log) => ({
       id: log.id,
-      syncType: log.sync_type,
-      startedAt: log.started_at,
-      completedAt: log.completed_at,
-      recordsSynced: log.records_synced,
+      syncType: log.syncType,
+      startedAt: log.startedAt,
+      completedAt: log.completedAt,
+      recordsSynced: log.recordsSynced,
       status: log.status,
-      errorMessage: log.error_message,
+      errorMessage: log.errorMessage,
       metadata: log.metadata,
       // Calculate duration if completed
-      durationSeconds: log.completed_at && log.started_at
+      durationSeconds: log.completedAt && log.startedAt
         ? Math.round(
-            (new Date(log.completed_at).getTime() - new Date(log.started_at).getTime()) / 1000
+            (new Date(log.completedAt).getTime() - new Date(log.startedAt).getTime()) / 1000
           )
         : null,
     }))
@@ -151,7 +141,6 @@ export async function GET(request: NextRequest) {
  */
 export async function POST(request: NextRequest) {
   try {
-    const supabase = createServerClient()
     const body = await request.json()
 
     if (body.action !== 'cleanup-stuck') {
@@ -160,27 +149,23 @@ export async function POST(request: NextRequest) {
 
     // Default to jobs running for more than 10 minutes
     const olderThanMinutes = body.olderThanMinutes || 10
-    const cutoffTime = new Date(Date.now() - olderThanMinutes * 60 * 1000).toISOString()
+    const cutoffTime = new Date(Date.now() - olderThanMinutes * 60 * 1000)
 
     // Update all stuck running jobs to failed
-    const { data, error } = await supabase
-      .from('sync_activity_log')
-      .update({
+    const data = await db
+      .update(syncActivityLog)
+      .set({
         status: 'failed',
-        completed_at: new Date().toISOString(),
-        error_message: `Timed out after ${olderThanMinutes} minutes (cleanup)`,
+        completedAt: new Date(),
+        errorMessage: `Timed out after ${olderThanMinutes} minutes (cleanup)`,
       })
-      .eq('status', 'running')
-      .lt('started_at', cutoffTime)
-      .select('id')
-
-    if (error) {
-      console.error('[sync-log API] Cleanup error:', error)
-      return NextResponse.json(
-        { error: 'Failed to cleanup stuck jobs', details: error.message },
-        { status: 500 }
+      .where(
+        and(
+          eq(syncActivityLog.status, 'running'),
+          lt(syncActivityLog.startedAt, cutoffTime)
+        )
       )
-    }
+      .returning({ id: syncActivityLog.id })
 
     const cleanedUp = data?.length || 0
     console.log(`[sync-log API] Cleaned up ${cleanedUp} stuck jobs`)
