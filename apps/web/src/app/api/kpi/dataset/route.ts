@@ -8,105 +8,19 @@ import {
   STAGE_COLORS,
   type FunnelStage,
 } from '@/features/kpi/lib/config'
+import type {
+  DailyAggregate,
+  DimensionSource,
+  DimensionStage,
+  DimensionCampaign,
+  DimensionExpenseCategory,
+  WeeklyTrend,
+  DailyExpenseByCategory,
+} from '@/features/kpi/lib/dataset-types'
 import { getLatestMetrics } from '@/features/skool/lib/metrics-sync'
 import { getLatestRevenueSnapshot } from '@/features/skool/lib/revenue-sync'
 
 export const dynamic = 'force-dynamic'
-
-/**
- * KPI Dataset Endpoint
- *
- * Returns all pre-aggregated data needed for instant client-side filtering.
- * Load once per session, then filter in-memory on the client.
- *
- * Response shape:
- * {
- *   aggregates: { daily, bySource, byCampaign, bySourceAndCampaign }
- *   dimensions: { sources, campaigns, stages, expenseCategories }
- *   weeklyTrends: [...]
- *   skool: { latest metrics }
- *   expenses: { byCategory, byDate }
- *   meta: { generatedAt, periodStart, periodEnd }
- * }
- */
-
-interface DailyAggregate {
-  id: string
-  date: string
-  campaign_id: string | null
-  source: string | null
-  new_members: number
-  new_hand_raisers: number
-  new_qualified_premium: number
-  new_qualified_vip: number
-  new_offer_made: number
-  new_offer_seen: number
-  new_vip: number
-  new_premium: number
-  total_revenue: number
-  vip_revenue: number
-  premium_revenue: number
-  success_fee_revenue: number
-  ad_spend: number
-  expenses: number
-  total_funded_amount: number
-  funded_count: number
-}
-
-interface DimensionSource {
-  source: string
-  display_name: string
-  contact_count: number
-  last_seen_date: string | null
-  is_active: boolean
-}
-
-interface DimensionStage {
-  stage: string
-  display_name: string
-  color: string
-  sort_order: number
-  contact_count: number
-}
-
-interface DimensionCampaign {
-  campaign_id: string
-  campaign_name: string
-  contact_count: number
-  is_active: boolean
-}
-
-interface DimensionExpenseCategory {
-  category: string
-  display_name: string | null
-  color: string | null
-  expense_count: number
-  total_amount: number
-  is_system: boolean
-}
-
-interface WeeklyTrend {
-  week_start: string
-  week_number: string
-  source: string | null
-  campaign_id: string | null
-  new_leads: number
-  new_hand_raisers: number
-  new_qualified: number
-  new_clients: number
-  total_revenue: number
-  ad_spend: number
-  cost_per_lead: number | null
-  cost_per_client: number | null
-}
-
-interface DailyExpenseByCategory {
-  date: string
-  category: string
-  amount: number
-  is_system: boolean
-  expense_count: number
-}
 
 export async function GET(request: Request) {
   const { userId } = await auth()
@@ -224,7 +138,7 @@ export async function GET(request: Request) {
     // Build dimension stages with live counts
     const dimensionStagesWithCounts = dimensionStagesData.map((stage) => ({
       ...stage,
-      contact_count: stageCountsMap[stage.stage!] || stage.contactCount || 0,
+      contactCount: stageCountsMap[stage.stage!] || stage.contactCount || 0,
     }))
 
     // Organize aggregates by dimension for easy client-side slicing
@@ -234,12 +148,12 @@ export async function GET(request: Request) {
 
     for (const agg of aggregates) {
       // Overall aggregates (no campaign, no source filter)
-      if (!agg.campaign_id && !agg.source) {
+      if (!agg.campaignId && !agg.source) {
         dailyAggregates.push(agg)
       }
 
       // By source aggregates
-      if (agg.source && !agg.campaign_id) {
+      if (agg.source && !agg.campaignId) {
         if (!bySourceAggregates[agg.source]) {
           bySourceAggregates[agg.source] = []
         }
@@ -247,11 +161,11 @@ export async function GET(request: Request) {
       }
 
       // By campaign aggregates
-      if (agg.campaign_id && !agg.source) {
-        if (!byCampaignAggregates[agg.campaign_id]) {
-          byCampaignAggregates[agg.campaign_id] = []
+      if (agg.campaignId && !agg.source) {
+        if (!byCampaignAggregates[agg.campaignId]) {
+          byCampaignAggregates[agg.campaignId] = []
         }
-        byCampaignAggregates[agg.campaign_id].push(agg)
+        byCampaignAggregates[agg.campaignId].push(agg)
       }
     }
 
@@ -268,9 +182,9 @@ export async function GET(request: Request) {
     const overallWeeklyTrends: WeeklyTrend[] = []
 
     for (const trend of weeklyTrendsData as unknown as WeeklyTrend[]) {
-      if (!trend.source && !trend.campaign_id) {
+      if (!trend.source && !trend.campaignId) {
         overallWeeklyTrends.push(trend)
-      } else if (trend.source && !trend.campaign_id) {
+      } else if (trend.source && !trend.campaignId) {
         if (!weeklyTrendsBySource[trend.source]) {
           weeklyTrendsBySource[trend.source] = []
         }
@@ -291,7 +205,7 @@ export async function GET(request: Request) {
 
       // Sum by date
       const current = dailyExpensesMap.get(expense.date) || 0
-      dailyExpensesMap.set(expense.date, current + expense.amount)
+      dailyExpensesMap.set(expense.date, current + Number(expense.amount))
     }
 
     // Convert to sorted array
@@ -312,9 +226,9 @@ export async function GET(request: Request) {
         all: aggregates,
       },
       dimensions: {
-        sources: dimensionSourcesData as unknown as DimensionSource[],
-        stages: dimensionStagesWithCounts as unknown as DimensionStage[],
-        campaigns: dimensionCampaignsData as unknown as DimensionCampaign[],
+        sources: dimensionSourcesData as DimensionSource[],
+        stages: dimensionStagesWithCounts as DimensionStage[],
+        campaigns: dimensionCampaignsData as DimensionCampaign[],
         expenseCategories: dimensionExpenseCategoriesData as unknown as DimensionExpenseCategory[],
       },
       funnel: {

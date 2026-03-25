@@ -68,7 +68,7 @@ export async function GET(request: NextRequest) {
 
     const posts = data.map((row) => ({
       ...row.post,
-      variation_group: row.variationGroup?.id ? row.variationGroup : null,
+      variationGroup: row.variationGroup?.id ? row.variationGroup : null,
     }))
 
     return NextResponse.json({ posts })
@@ -142,7 +142,7 @@ export async function POST(request: NextRequest) {
       variationGroup = vg || null
     }
 
-    return NextResponse.json({ post: { ...inserted, variation_group: variationGroup } }, { status: 201 })
+    return NextResponse.json({ post: { ...inserted, variationGroup } }, { status: 201 })
   } catch (error) {
     console.error('[Posts API] POST exception:', error)
     return NextResponse.json(
@@ -222,7 +222,7 @@ export async function PUT(request: NextRequest) {
       variationGroup = vg || null
     }
 
-    return NextResponse.json({ post: { ...updated, variation_group: variationGroup } })
+    return NextResponse.json({ post: { ...updated, variationGroup } })
   } catch (error) {
     console.error('[Posts API] PUT exception:', error)
     return NextResponse.json(
