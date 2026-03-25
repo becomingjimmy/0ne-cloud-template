@@ -190,7 +190,7 @@ export async function GET(request: Request) {
             )
 
           // Sum up successful transaction amounts
-          totalRevenue = txns.reduce((sum, t) => sum + (Number(t.amount) || 0), 0)
+          totalRevenue = txns.reduce((sum, t) => sum + (t.amount || 0), 0)
         }
 
         // EPL = Total Revenue / Cohort Size (total contacts, not just eligible)

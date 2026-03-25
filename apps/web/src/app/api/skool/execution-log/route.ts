@@ -57,7 +57,7 @@ export async function GET(request: NextRequest) {
       .from(skoolPostExecutionLog)
       .where(whereClause)
 
-    const total = Number(countResult?.value ?? 0)
+    const total = countResult?.value ?? 0
 
     // Build query with joins to get scheduler and post details
     const data = await db

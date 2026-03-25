@@ -118,7 +118,7 @@ export async function GET(request: Request) {
     // Get revenue history for trend chart
     const revenueHistory = await getRevenueHistory('fruitful', startDate, endDate)
 
-    const recurringCurrent = Number(latestSnapshot?.mrr || 0)
+    const recurringCurrent = latestSnapshot?.mrr || 0
     const recurringPrevious = mrrChange.startMrr || 0
     const recurringChange = mrrChange.change || 0
     const recurringChangePercent = mrrChange.changePercent || 0
@@ -143,7 +143,7 @@ export async function GET(request: Request) {
         )
       )
 
-    const oneTimeCurrent = currentTransactions.reduce((sum, t) => sum + Number(t.amount), 0)
+    const oneTimeCurrent = currentTransactions.reduce((sum, t) => sum + (t.amount || 0), 0)
 
     // Get one-time revenue for previous period (for comparison)
     const previousTransactions = await db
@@ -157,7 +157,7 @@ export async function GET(request: Request) {
         )
       )
 
-    const oneTimePrevious = previousTransactions.reduce((sum, t) => sum + Number(t.amount), 0)
+    const oneTimePrevious = previousTransactions.reduce((sum, t) => sum + (t.amount || 0), 0)
 
     const oneTimeChange = oneTimeCurrent - oneTimePrevious
     const oneTimeChangePercent = calculateChange(oneTimeCurrent, oneTimePrevious)
@@ -192,7 +192,7 @@ export async function GET(request: Request) {
       }
       const data = monthlyMap.get(month)!
       // Use the last MRR value for each month as the monthly recurring
-      data.recurring = Number(snapshot.mrr || 0)
+      data.recurring = snapshot.mrr || 0
     }
 
     // Add one-time revenue from GHL transactions
@@ -216,7 +216,7 @@ export async function GET(request: Request) {
         monthlyMap.set(month, { total: 0, oneTime: 0, recurring: 0 })
       }
       const data = monthlyMap.get(month)!
-      data.oneTime += Number(txn.amount)
+      data.oneTime += txn.amount || 0
     }
 
     // Calculate totals

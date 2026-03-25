@@ -196,7 +196,7 @@ export async function GET(request: Request) {
 
     const filteredAboutVisits = aboutPageDaily.reduce((sum, row) => sum + (row.visitors || 0), 0)
     const filteredConversionRate = aboutPageDaily.length > 0
-      ? aboutPageDaily.reduce((sum, row) => sum + (Number(row.conversionRate) || 0), 0) / aboutPageDaily.length
+      ? aboutPageDaily.reduce((sum, row) => sum + (row.conversionRate || 0), 0) / aboutPageDaily.length
       : skoolMetrics?.conversionRate || 0
 
     console.log(`[KPI Overview] About visits for ${startDate} to ${endDate}: ${filteredAboutVisits} (${aboutPageDaily?.length || 0} days)`)
@@ -350,7 +350,7 @@ export async function GET(request: Request) {
     // Calculate metrics
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const sumField = (data: typeof currentAggregates, field: string) =>
-      data.reduce((sum, row) => sum + (Number((row as any)[field]) || 0), 0)
+      data.reduce((sum, row) => sum + ((row as any)[field] as number || 0), 0)
 
     const currentRevenue = sumField(currentAggregates, 'totalRevenue')
     const previousRevenue = sumField(previousAggregates, 'totalRevenue')
@@ -400,7 +400,7 @@ export async function GET(request: Request) {
         handRaisers: row.newHandRaisers || 0,
         qualified: row.newQualified || 0,
         clients: (row.newVip || 0) + (row.newPremium || 0),
-        revenue: Number(row.totalRevenue) || 0,
+        revenue: row.totalRevenue || 0,
       }))
 
     const response = {
@@ -410,7 +410,7 @@ export async function GET(request: Request) {
           previous: previousRevenue,
           change: Number(calculateChange(currentRevenue, previousRevenue).toFixed(1)),
           trend: currentRevenue >= previousRevenue ? 'up' : 'down',
-          sparkline: sparklineData.map((d) => Number(d.totalRevenue) || 0),
+          sparkline: sparklineData.map((d) => d.totalRevenue || 0),
         },
         leads: {
           current: currentLeads,
@@ -431,7 +431,7 @@ export async function GET(request: Request) {
           previous: previousFunded,
           change: Number(calculateChange(currentFunded, previousFunded).toFixed(1)),
           trend: currentFunded >= previousFunded ? 'up' : 'down',
-          sparkline: sparklineData.map((d) => Number(d.totalFundedAmount) || 0),
+          sparkline: sparklineData.map((d) => d.totalFundedAmount || 0),
         },
         costPerLead: {
           current: currentLeads > 0 ? Number((currentAdSpend / currentLeads).toFixed(2)) : 0,
@@ -443,7 +443,7 @@ export async function GET(request: Request) {
             ? (currentAdSpend / currentLeads <= previousAdSpend / previousLeads ? 'up' : 'down')
             : 'neutral',
           sparkline: sparklineData.map((d) =>
-            (d.newLeads || 0) > 0 ? Number(((Number(d.adSpend) || 0) / d.newLeads!).toFixed(2)) : 0
+            (d.newLeads || 0) > 0 ? Number(((d.adSpend || 0) / d.newLeads!).toFixed(2)) : 0
           ),
         },
         costPerClient: {
@@ -457,7 +457,7 @@ export async function GET(request: Request) {
             : 'neutral',
           sparkline: sparklineData.map((d) => {
             const clients = (d.newVip || 0) + (d.newPremium || 0)
-            return clients > 0 ? Number(((Number(d.adSpend) || 0) / clients).toFixed(2)) : 0
+            return clients > 0 ? Number(((d.adSpend || 0) / clients).toFixed(2)) : 0
           }),
         },
       },

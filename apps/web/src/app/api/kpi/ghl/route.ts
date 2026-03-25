@@ -165,26 +165,26 @@ export async function GET(request: Request) {
     // =============================================================================
 
     // Current period totals by source
-    const currentTotalRevenue = currentTransactions.reduce((sum, t) => sum + Number(t.amount), 0)
+    const currentTotalRevenue = currentTransactions.reduce((sum, t) => sum + (t.amount || 0), 0)
     const currentSetupFees = currentTransactions
       ?.filter((t) => t.entitySourceName === 'PREIFM')
-      .reduce((sum, t) => sum + Number(t.amount), 0) || 0
+      .reduce((sum, t) => sum + (t.amount || 0), 0) || 0
     const currentFundingFees = currentTransactions
       ?.filter((t) => t.entitySourceName === 'New Invoice')
-      .reduce((sum, t) => sum + Number(t.amount), 0) || 0
+      .reduce((sum, t) => sum + (t.amount || 0), 0) || 0
     const currentTransactionCount = currentTransactions.length
     const currentAvgTransaction = currentTransactionCount > 0
       ? currentTotalRevenue / currentTransactionCount
       : 0
 
     // Previous period totals by source
-    const previousTotalRevenue = previousTransactions.reduce((sum, t) => sum + Number(t.amount), 0)
+    const previousTotalRevenue = previousTransactions.reduce((sum, t) => sum + (t.amount || 0), 0)
     const previousSetupFees = previousTransactions
       ?.filter((t) => t.entitySourceName === 'PREIFM')
-      .reduce((sum, t) => sum + Number(t.amount), 0) || 0
+      .reduce((sum, t) => sum + (t.amount || 0), 0) || 0
     const previousFundingFees = previousTransactions
       ?.filter((t) => t.entitySourceName === 'New Invoice')
-      .reduce((sum, t) => sum + Number(t.amount), 0) || 0
+      .reduce((sum, t) => sum + (t.amount || 0), 0) || 0
     const previousTransactionCount = previousTransactions.length
     const previousAvgTransaction = previousTransactionCount > 0
       ? previousTotalRevenue / previousTransactionCount
@@ -349,7 +349,7 @@ export async function GET(request: Request) {
         id: t.id,
         contact_name: t.contactName,
         transaction_type: t.entitySourceName === 'PREIFM' ? 'Setup Fee' : t.entitySourceName === 'New Invoice' ? 'Funding Fee' : t.entitySourceName || 'Unknown',
-        amount: Number(t.amount),
+        amount: t.amount || 0,
         status: t.status!,
         transaction_date: t.transactionDate!.toISOString(),
       }))
@@ -391,7 +391,7 @@ export async function GET(request: Request) {
         }
 
         const entry = grouped.get(key)!
-        const amount = Number(txn.amount)
+        const amount = txn.amount || 0
 
         if (txn.entitySourceName === 'PREIFM') {
           entry.setupFees += amount

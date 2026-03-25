@@ -59,7 +59,7 @@ async function getUserPreferences(
       return null
     }
 
-    return data as unknown as NotificationPreferences
+    return data as NotificationPreferences
   } catch (error) {
     console.error('[notifications] Failed to fetch preferences:', error)
     return null

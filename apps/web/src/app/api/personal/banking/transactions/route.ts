@@ -156,7 +156,7 @@ export async function POST(request: Request) {
     const [expense] = await db.insert(personalExpenses).values({
       name: txn.merchantName || txn.name || 'Unknown',
       category: txn.mappedCategory || 'other',
-      amount: String(Math.abs(Number(txn.amount))),
+      amount: Math.abs(txn.amount || 0),
       expenseDate: txn.date,
       frequency: 'one_time',
       isActive: true,

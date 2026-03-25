@@ -106,9 +106,9 @@ export async function GET(request: Request) {
       .orderBy(desc(skoolRevenueDaily.snapshotDate))
       .limit(1)
 
-    const currentMrr = Number(latestRevenue?.mrr) || 0
+    const currentMrr = latestRevenue?.mrr || 0
     const payingMembers = latestRevenue?.payingMembers || 0
-    const retentionRate = Number(latestRevenue?.retentionRate) || 100
+    const retentionRate = latestRevenue?.retentionRate || 100
 
     // =============================================================================
     // 2. CALCULATE ARPU
@@ -159,7 +159,7 @@ export async function GET(request: Request) {
         )
       )
 
-    const oneTimeRevenue = transactions.reduce((sum, t) => sum + Number(t.amount), 0)
+    const oneTimeRevenue = transactions.reduce((sum, t) => sum + (t.amount || 0), 0)
 
     // Get cumulative recurring revenue over period
     // For EPL, we calculate average MRR × months in period
@@ -212,7 +212,7 @@ export async function GET(request: Request) {
           )
         )
 
-      const cohortOneTimeRevenue = cohortTransactions.reduce((sum, t) => sum + Number(t.amount), 0)
+      const cohortOneTimeRevenue = cohortTransactions.reduce((sum, t) => sum + (t.amount || 0), 0)
 
       // For recurring, estimate based on MRR history
       const [cohortMrr] = await db
@@ -229,7 +229,7 @@ export async function GET(request: Request) {
 
       // Approximate recurring revenue for cohort period
       const cohortMonths = Math.max(1, Math.ceil(days / 30))
-      const cohortRecurringRevenue = (Number(cohortMrr?.mrr) || 0) * cohortMonths
+      const cohortRecurringRevenue = (cohortMrr?.mrr || 0) * cohortMonths
       const cohortTotalRevenue = cohortOneTimeRevenue + cohortRecurringRevenue
 
       const cohortMemberCount = cohortMembers || 1
@@ -257,7 +257,7 @@ export async function GET(request: Request) {
         )
       )
 
-    const totalAdSpend = adSpend.reduce((sum, e) => sum + Number(e.amount), 0)
+    const totalAdSpend = adSpend.reduce((sum, e) => sum + (e.amount || 0), 0)
 
     // Get client count (Premium + VIP) from contacts
     const [{ value: premiumCount }] = await db

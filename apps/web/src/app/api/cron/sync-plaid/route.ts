@@ -92,7 +92,7 @@ export async function GET(request: Request) {
             const record = {
               transactionId: txn.transaction_id,
               accountId: ourAccountId,
-              amount: String(txn.amount),
+              amount: Number(txn.amount),
               date: txn.date,
               name: txn.name || null,
               merchantName: txn.merchant_name || null,
@@ -142,7 +142,7 @@ export async function GET(request: Request) {
           await db
             .update(plaidTransactions)
             .set({
-              amount: String(txn.amount),
+              amount: Number(txn.amount),
               date: txn.date,
               name: txn.name || null,
               merchantName: txn.merchant_name || null,

@@ -206,7 +206,7 @@ export async function GET(request: Request) {
         categoryMap.set(catKey, { current: 0, previous: 0, isSystem: canonical.isSystem, displayName: canonical.name, color: canonical.color })
       }
       const entry = categoryMap.get(catKey)!
-      entry.current += Number(exp.amount) || 0
+      entry.current += exp.amount || 0
     })
 
     previousExpenses.forEach((exp) => {
@@ -217,12 +217,12 @@ export async function GET(request: Request) {
         categoryMap.set(catKey, { current: 0, previous: 0, isSystem: canonical.isSystem, displayName: canonical.name, color: canonical.color })
       }
       const entry = categoryMap.get(catKey)!
-      entry.previous += Number(exp.amount) || 0
+      entry.previous += exp.amount || 0
     })
 
     // Calculate Facebook Ads spend from ad_metrics (source of truth for ad spend)
-    const currentAdSpend = currentAdMetrics.reduce((sum, m) => sum + (Number(m.spend) || 0), 0)
-    const previousAdSpend = previousAdMetrics.reduce((sum, m) => sum + (Number(m.spend) || 0), 0)
+    const currentAdSpend = currentAdMetrics.reduce((sum, m) => sum + (m.spend || 0), 0)
+    const previousAdSpend = previousAdMetrics.reduce((sum, m) => sum + (m.spend || 0), 0)
 
     // Add Facebook Ads as a category from ad_metrics (not from expenses table)
     if (currentAdSpend > 0 || previousAdSpend > 0) {
@@ -258,7 +258,7 @@ export async function GET(request: Request) {
       if (!channelMap.has(channel)) {
         channelMap.set(channel, { spend: 0, leads: 0, clients: 0 })
       }
-      channelMap.get(channel)!.spend += Number(metric.spend) || 0
+      channelMap.get(channel)!.spend += metric.spend || 0
       channelMap.get(channel)!.leads += Number((metric as unknown as Record<string, unknown>).leads) || 0
       // Note: clients would need to come from a join with conversions data
     })
@@ -289,7 +289,7 @@ export async function GET(request: Request) {
         monthlyMap.set(month, { ads: 0, tools: 0, content: 0, team: 0, total: 0 })
       }
       const entry = monthlyMap.get(month)!
-      const spend = Number(metric.spend) || 0
+      const spend = metric.spend || 0
       entry.ads += spend
       entry.total += spend
     })
@@ -301,7 +301,7 @@ export async function GET(request: Request) {
         monthlyMap.set(month, { ads: 0, tools: 0, content: 0, team: 0, total: 0 })
       }
       const entry = monthlyMap.get(month)!
-      const amount = Number(exp.amount) || 0
+      const amount = exp.amount || 0
       entry.total += amount
 
       // Map categories to standard buckets
@@ -349,7 +349,7 @@ export async function GET(request: Request) {
         id: exp.id,
         name: exp.name || 'Unnamed',
         category: canonical.name, // Use canonical display name
-        amount: Number(exp.amount) || 0,
+        amount: exp.amount || 0,
         frequency: exp.frequency || 'one_time',
         isActive: exp.isActive !== false,
         isSystem: exp.isSystem || false,
@@ -416,7 +416,7 @@ export async function POST(request: Request) {
       .insert(expenses)
       .values({
         name: description, // Map description to name column
-        amount: String(Number(amount)),
+        amount: Number(amount),
         category,
         expenseDate: expense_date,
         frequency: frequency || 'one_time',
@@ -484,7 +484,7 @@ export async function PUT(request: Request) {
     // Build update object with only provided fields
     const updateData: Record<string, unknown> = {
       name: description, // Map description to name column
-      amount: String(Number(amount)),
+      amount: Number(amount),
       category,
     }
 

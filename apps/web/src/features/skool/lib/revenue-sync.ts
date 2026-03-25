@@ -94,8 +94,8 @@ export async function getMrrChange(
     .orderBy(desc(skoolRevenueDaily.snapshotDate))
     .limit(1)
 
-  const startMrr = Number(startData?.mrr || 0)
-  const endMrr = Number(endData?.mrr || 0)
+  const startMrr = startData?.mrr || 0
+  const endMrr = endData?.mrr || 0
   const change = endMrr - startMrr
   const changePercent = startMrr > 0 ? ((change / startMrr) * 100) : null
 

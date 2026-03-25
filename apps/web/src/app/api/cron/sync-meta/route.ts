@@ -218,21 +218,21 @@ export async function GET(request: Request) {
           adsetName: insight.adset_name || null,
           adId: insight.ad_id || null,
           adName: insight.ad_name || null,
-          spend: String(parseFloat(insight.spend) || 0),
+          spend: parseFloat(insight.spend) || 0,
           impressions: parseInt(insight.impressions) || 0,
           clicks: parseInt(insight.clicks) || 0,
           reach: parseInt(insight.reach || '0') || 0,
-          frequency: String(parseFloat(insight.frequency || '0') || 0),
+          frequency: parseFloat(insight.frequency || '0') || 0,
           uniqueClicks: parseInt(insight.unique_clicks || '0') || 0,
           linkClicks: parseInt(insight.inline_link_clicks || '0') || 0,
           landingPageViews,
           completedRegistrations,
           conversions,
-          costPerConversion: String(costPerConversion),
-          roas: String(roas),
-          cpm: String(parseFloat(insight.cpm) || 0),
-          cpc: String(parseFloat(insight.cpc) || 0),
-          ctr: String(parseFloat(insight.ctr) || 0),
+          costPerConversion,
+          roas,
+          cpm: parseFloat(insight.cpm) || 0,
+          cpc: parseFloat(insight.cpc) || 0,
+          ctr: parseFloat(insight.ctr) || 0,
         }
 
         await db
@@ -304,11 +304,11 @@ export async function GET(request: Request) {
           date: insight.date_start,
           platform: 'meta',
           reach: parseInt(insight.reach || '0') || 0,
-          frequency: String(parseFloat(insight.frequency || '0') || 0),
+          frequency: parseFloat(insight.frequency || '0') || 0,
           uniqueClicks: parseInt(insight.unique_clicks || '0') || 0,
           impressions: parseInt(insight.impressions) || 0,
           clicks: parseInt(insight.clicks) || 0,
-          spend: String(parseFloat(insight.spend) || 0),
+          spend: parseFloat(insight.spend) || 0,
         }
 
         await db
@@ -362,7 +362,7 @@ export async function GET(request: Request) {
           await db
             .update(expenses)
             .set({
-              amount: String(dailySpend),
+              amount: dailySpend,
               name: `Facebook Ads - ${syncDate}`,
             })
             .where(eq(expenses.id, existing.id))
@@ -375,7 +375,7 @@ export async function GET(request: Request) {
             .values({
               name: `Facebook Ads - ${syncDate}`,
               category: 'Facebook Ads',
-              amount: String(dailySpend),
+              amount: dailySpend,
               frequency: 'one_time',
               expenseDate: syncDate,
               isActive: true,

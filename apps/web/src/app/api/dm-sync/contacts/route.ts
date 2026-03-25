@@ -96,10 +96,10 @@ export async function GET(request: NextRequest) {
     const uniqueFailed = new Set(failedContacts.map((m) => m.skoolUserId))
 
     const summary = {
-      totalContacts: Number(matchedCount || 0) + Number(unmatchedCount || 0),
-      matchedContacts: Number(matchedCount || 0),
-      unmatchedContacts: Number(unmatchedCount || 0),
-      totalMessages: Number(totalMessages || 0),
+      totalContacts: (matchedCount || 0) + (unmatchedCount || 0),
+      matchedContacts: matchedCount || 0,
+      unmatchedContacts: unmatchedCount || 0,
+      totalMessages: totalMessages || 0,
       contactsWithPending: uniquePending.size,
       contactsWithFailed: uniqueFailed.size,
     }
@@ -148,7 +148,7 @@ export async function GET(request: NextRequest) {
       .offset(offset)
 
     if (mappings.length === 0) {
-      return NextResponse.json({ contacts: [], summary, total: Number(filteredCount || 0) } as ContactActivityResponse)
+      return NextResponse.json({ contacts: [], summary, total: (filteredCount || 0) } as ContactActivityResponse)
     }
 
     // =========================================================================
@@ -368,7 +368,7 @@ export async function GET(request: NextRequest) {
       }
     }
 
-    return NextResponse.json({ contacts: contactsWithStats, summary, total: Number(filteredCount || 0) } as ContactActivityResponse)
+    return NextResponse.json({ contacts: contactsWithStats, summary, total: (filteredCount || 0) } as ContactActivityResponse)
   } catch (error) {
     console.error('[Contacts API] GET exception:', error)
     return NextResponse.json(

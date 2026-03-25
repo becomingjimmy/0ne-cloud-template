@@ -120,7 +120,7 @@ export async function POST(request: NextRequest) {
             groupId: metric.groupId,
             postId: metric.postId || null,
             metricType: metric.metricType,
-            metricValue: String(metric.metricValue),
+            metricValue: metric.metricValue,
             metricDate,
             rawData: metric.rawData || null,
           })
@@ -145,7 +145,7 @@ export async function POST(request: NextRequest) {
               }
 
               await db.update(skoolAnalytics).set({
-                metricValue: String(metric.metricValue),
+                metricValue: metric.metricValue,
                 rawData: metric.rawData || null,
                 recordedAt: new Date(),
               }).where(and(...conditions))
@@ -389,12 +389,12 @@ export async function POST(request: NextRequest) {
             groupSlug: m.groupId,
             date: dateKey,
             visitors: m.metricValue,
-            conversionRate: convRate != null ? String(Math.round(convRate * 10000) / 100) : null,
+            conversionRate: convRate != null ? Math.round(convRate * 10000) / 100 : null,
           }).onConflictDoUpdate({
             target: [skoolAboutPageDaily.groupSlug, skoolAboutPageDaily.date],
             set: {
               visitors: m.metricValue,
-              conversionRate: convRate != null ? String(Math.round(convRate * 10000) / 100) : null,
+              conversionRate: convRate != null ? Math.round(convRate * 10000) / 100 : null,
             },
           })
           aboutDaily++
@@ -426,8 +426,8 @@ export async function POST(request: NextRequest) {
       }
       if (snap.overview_num_members != null) snapshotRow.membersTotal = snap.overview_num_members
       if (snap.latest_active_members != null) snapshotRow.membersActive = snap.latest_active_members
-      if (snap.overview_conversion != null) snapshotRow.conversionRate = String(Math.round(snap.overview_conversion * 10000) / 100)
-      if (snap.overview_retention != null) snapshotRow.communityActivity = String(Math.round(snap.overview_retention * 10000) / 100)
+      if (snap.overview_conversion != null) snapshotRow.conversionRate = Math.round(snap.overview_conversion * 10000) / 100
+      if (snap.overview_retention != null) snapshotRow.communityActivity = Math.round(snap.overview_retention * 10000) / 100
       if (snap.discovery_category_rank != null) snapshotRow.categoryRank = snap.discovery_category_rank
 
       // Only upsert if we have at least one meaningful field

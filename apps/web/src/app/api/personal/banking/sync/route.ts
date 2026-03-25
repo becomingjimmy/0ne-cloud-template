@@ -102,7 +102,7 @@ export async function POST(request: Request) {
             await db.insert(plaidTransactions).values({
               transactionId: txn.transaction_id,
               accountId: ourAccountId,
-              amount: txn.amount != null ? String(txn.amount) : null,
+              amount: txn.amount != null ? Number(txn.amount) : null,
               date: txn.date,
               name: txn.name || null,
               merchantName: txn.merchant_name || null,
@@ -115,7 +115,7 @@ export async function POST(request: Request) {
               target: plaidTransactions.transactionId,
               set: {
                 accountId: ourAccountId,
-                amount: txn.amount != null ? String(txn.amount) : null,
+                amount: txn.amount != null ? Number(txn.amount) : null,
                 date: txn.date,
                 name: txn.name || null,
                 merchantName: txn.merchant_name || null,
@@ -152,7 +152,7 @@ export async function POST(request: Request) {
 
           await db.update(plaidTransactions)
             .set({
-              amount: txn.amount != null ? String(txn.amount) : null,
+              amount: txn.amount != null ? Number(txn.amount) : null,
               date: txn.date,
               name: txn.name || null,
               merchantName: txn.merchant_name || null,

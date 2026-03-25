@@ -30,11 +30,11 @@ export async function getLatestMetrics(
     snapshotDate: data.snapshotDate || '',
     membersTotal: data.membersTotal,
     membersActive: data.membersActive,
-    communityActivity: data.communityActivity ? Number(data.communityActivity) : null,
+    communityActivity: data.communityActivity ?? null,
     category: data.category,
     categoryRank: data.categoryRank,
     aboutPageVisits: data.aboutPageVisits,
-    conversionRate: data.conversionRate ? Number(data.conversionRate) : null,
+    conversionRate: data.conversionRate ?? null,
   }
 }
 
@@ -61,10 +61,10 @@ export async function getMetricsHistory(
     snapshotDate: d.snapshotDate || '',
     membersTotal: d.membersTotal,
     membersActive: d.membersActive,
-    communityActivity: d.communityActivity ? Number(d.communityActivity) : null,
+    communityActivity: d.communityActivity ?? null,
     category: d.category,
     categoryRank: d.categoryRank,
     aboutPageVisits: d.aboutPageVisits,
-    conversionRate: d.conversionRate ? Number(d.conversionRate) : null,
+    conversionRate: d.conversionRate ?? null,
   }))
 }

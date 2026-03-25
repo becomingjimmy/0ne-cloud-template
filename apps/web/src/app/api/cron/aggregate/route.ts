@@ -232,13 +232,13 @@ export async function GET(request: Request) {
         newVip: agg.new_vip,
         newPremium: agg.new_premium,
         newFunded: 0,
-        totalRevenue: String(agg.total_revenue),
-        vipRevenue: String(agg.vip_revenue),
-        premiumRevenue: String(agg.premium_revenue),
-        successFeeRevenue: String(agg.success_fee_revenue),
-        adSpend: String(agg.ad_spend),
-        expenses: '0',
-        totalFundedAmount: String(agg.total_funded_amount),
+        totalRevenue: agg.total_revenue,
+        vipRevenue: agg.vip_revenue,
+        premiumRevenue: agg.premium_revenue,
+        successFeeRevenue: agg.success_fee_revenue,
+        adSpend: agg.ad_spend,
+        expenses: 0,
+        totalFundedAmount: agg.total_funded_amount,
         fundedCount: agg.funded_count,
       }
 
@@ -290,7 +290,7 @@ export async function GET(request: Request) {
     const expenseCategoryRows = Array.from(expensesByCategory.entries()).map(([category, data]) => ({
       date: dateStr,
       category,
-      amount: String(data.amount),
+      amount: data.amount,
       expenseCount: data.count,
       isSystem: data.isSystem,
     }))
@@ -416,10 +416,10 @@ export async function GET(request: Request) {
             newHandRaisers: totals.newHandRaisers,
             newQualified: totals.newQualified,
             newClients: totals.newClients,
-            totalRevenue: String(totals.totalRevenue),
-            adSpend: String(totals.adSpend),
-            costPerLead: totals.newLeads > 0 ? String(totals.adSpend / totals.newLeads) : null,
-            costPerClient: totals.newClients > 0 ? String(totals.adSpend / totals.newClients) : null,
+            totalRevenue: totals.totalRevenue,
+            adSpend: totals.adSpend,
+            costPerLead: totals.newLeads > 0 ? totals.adSpend / totals.newLeads : null,
+            costPerClient: totals.newClients > 0 ? totals.adSpend / totals.newClients : null,
           }
 
           await db

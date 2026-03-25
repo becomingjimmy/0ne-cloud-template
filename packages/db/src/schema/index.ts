@@ -1,4 +1,5 @@
 // Schema index - re-exports all tables from all domain files
+export { numericNumber } from './columns'
 export * from './kpi'
 export * from './skool'
 export * from './scheduler'

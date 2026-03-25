@@ -37,7 +37,7 @@ export async function GET(request: Request) {
       )
 
     const cashOnHand = accounts.reduce(
-      (sum, a) => sum + (Number(a.availableBalance) || Number(a.currentBalance) || 0),
+      (sum, a) => sum + (a.availableBalance || a.currentBalance || 0),
       0
     )
 
@@ -66,7 +66,7 @@ export async function GET(request: Request) {
     const months = new Set<string>()
     let totalExpenses = 0
     for (const exp of expenses) {
-      totalExpenses += Number(exp.amount) || 0
+      totalExpenses += exp.amount || 0
       if (exp.expenseDate) {
         months.add(exp.expenseDate.substring(0, 7))
       }

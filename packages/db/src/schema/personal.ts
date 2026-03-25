@@ -1,4 +1,5 @@
-import { pgTable, uuid, text, integer, boolean, timestamp, date, numeric, jsonb, index, uniqueIndex } from 'drizzle-orm/pg-core'
+import { pgTable, uuid, text, integer, boolean, timestamp, date, jsonb, index, uniqueIndex } from 'drizzle-orm/pg-core'
+import { numericNumber } from './columns'
 
 // ---------------------------------------------------------------------------
 // Personal Expenses
@@ -8,7 +9,7 @@ export const personalExpenses = pgTable('personal_expenses', {
   id: uuid('id').primaryKey().defaultRandom(),
   name: text('name').notNull(),
   category: text('category'),
-  amount: numeric('amount', { precision: 10, scale: 2 }).notNull(),
+  amount: numericNumber('amount', { precision: 10, scale: 2 }).notNull(),
   frequency: text('frequency').default('one_time'),
   expenseDate: date('expense_date'),
   startDate: date('start_date'),
@@ -87,9 +88,9 @@ export const plaidAccounts = pgTable('plaid_accounts', {
   type: text('type'),
   subtype: text('subtype'),
   mask: text('mask'),
-  currentBalance: numeric('current_balance', { precision: 10, scale: 2 }),
-  availableBalance: numeric('available_balance', { precision: 10, scale: 2 }),
-  creditLimit: numeric('credit_limit', { precision: 10, scale: 2 }),
+  currentBalance: numericNumber('current_balance', { precision: 10, scale: 2 }),
+  availableBalance: numericNumber('available_balance', { precision: 10, scale: 2 }),
+  creditLimit: numericNumber('credit_limit', { precision: 10, scale: 2 }),
   isoCurrencyCode: text('iso_currency_code').default('USD'),
   scope: text('scope').default('personal'),
   isHidden: boolean('is_hidden').default(false),
@@ -109,7 +110,7 @@ export const plaidTransactions = pgTable('plaid_transactions', {
   id: uuid('id').primaryKey().defaultRandom(),
   transactionId: text('transaction_id').unique().notNull(),
   accountId: uuid('account_id').notNull().references(() => plaidAccounts.id, { onDelete: 'cascade' }),
-  amount: numeric('amount', { precision: 10, scale: 2 }),
+  amount: numericNumber('amount', { precision: 10, scale: 2 }),
   date: date('date').notNull(),
   name: text('name'),
   merchantName: text('merchant_name'),

@@ -80,7 +80,7 @@ export async function POST(request: NextRequest) {
           staffSkoolId,
           groupId,
           metricName: kpi.metricName,
-          metricValue: kpi.metricValue != null ? String(kpi.metricValue) : null,
+          metricValue: kpi.metricValue != null ? kpi.metricValue : null,
           recordedAt: now,
         })
 

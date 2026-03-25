@@ -184,7 +184,7 @@ export async function GET(request: Request) {
         })
       }
       const entry = categoryMap.get(catKey)!
-      entry.current += Number(exp.amount) || 0
+      entry.current += exp.amount || 0
     })
 
     previousExpenses.forEach((exp) => {
@@ -201,7 +201,7 @@ export async function GET(request: Request) {
         })
       }
       const entry = categoryMap.get(catKey)!
-      entry.previous += Number(exp.amount) || 0
+      entry.previous += exp.amount || 0
     })
 
     const categories = Array.from(categoryMap.entries()).map(([_key, data]) => ({
@@ -222,7 +222,7 @@ export async function GET(request: Request) {
         monthlyMap.set(month, { total: 0, byCategory: {} })
       }
       const entry = monthlyMap.get(month)!
-      const amount = Number(exp.amount) || 0
+      const amount = exp.amount || 0
       entry.total += amount
 
       const catName = getCanonicalInfo(getCategoryKey(exp.category || 'Other')).name
@@ -246,7 +246,7 @@ export async function GET(request: Request) {
         id: exp.id,
         name: exp.name || 'Unnamed',
         category: canonical.name,
-        amount: Number(exp.amount) || 0,
+        amount: exp.amount || 0,
         frequency: exp.frequency || 'one_time',
         isActive: exp.isActive !== false,
         expenseDate: exp.expenseDate,
@@ -305,7 +305,7 @@ export async function POST(request: Request) {
 
     const [expense] = await db.insert(personalExpenses).values({
       name: description, // Map description to name column
-      amount: String(Number(amount)),
+      amount: Number(amount),
       category,
       expenseDate: expense_date,
       frequency: frequency || 'one_time',
@@ -355,7 +355,7 @@ export async function PUT(request: Request) {
     // Build update object with only provided fields
     const updateData: Record<string, unknown> = {
       name: description, // Map description to name column
-      amount: String(Number(amount)),
+      amount: Number(amount),
       category,
     }
 

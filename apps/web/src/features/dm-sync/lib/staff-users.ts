@@ -52,6 +52,7 @@ export async function getStaffUsers(userId: string): Promise<StaffUserRow[]> {
       .where(eq(staffUsersTable.clerkUserId, userId))
       .orderBy(asc(staffUsersTable.displayName))
 
+    // as unknown as: bridges Date|null→string (createdAt/updatedAt), boolean|null→boolean (isActive/isDefault), string|null→string (clerkUserId)
     return data as unknown as StaffUserRow[]
   } catch (error) {
     console.error('[Staff Users] Error fetching staff:', error)

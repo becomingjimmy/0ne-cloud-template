@@ -1,4 +1,5 @@
-import { pgTable, uuid, text, integer, boolean, timestamp, numeric, index } from 'drizzle-orm/pg-core'
+import { pgTable, uuid, text, integer, boolean, timestamp, index } from 'drizzle-orm/pg-core'
+import { numericNumber } from './columns'
 
 // ─── GHL Transactions ────────────────────────────────────────────────────────
 
@@ -10,7 +11,7 @@ export const ghlTransactions = pgTable('ghl_transactions', {
   ghlSubscriptionId: text('ghl_subscription_id'),
   contactName: text('contact_name'),
   contactEmail: text('contact_email'),
-  amount: numeric('amount', { precision: 10, scale: 2 }),
+  amount: numericNumber('amount', { precision: 10, scale: 2 }),
   currency: text('currency').default('USD'),
   status: text('status'),
   entityType: text('entity_type'),

@@ -169,7 +169,7 @@ export async function GET(request: NextRequest) {
         pagination: {
           limit,
           offset,
-          hasMore: Number(filteredCount || 0) > offset + limit,
+          hasMore: (filteredCount || 0) > offset + limit,
         },
       } as RawMessagesResponse)
     }

@@ -34,9 +34,9 @@ export async function GET(request: Request) {
           for (const account of plaidAccountsList) {
             await db.update(plaidAccounts)
               .set({
-                currentBalance: account.balances.current != null ? String(account.balances.current) : null,
-                availableBalance: account.balances.available != null ? String(account.balances.available) : null,
-                creditLimit: account.balances.limit ? String(account.balances.limit) : null,
+                currentBalance: account.balances.current ?? null,
+                availableBalance: account.balances.available ?? null,
+                creditLimit: account.balances.limit ?? null,
               })
               .where(eq(plaidAccounts.accountId, account.account_id))
           }
@@ -77,8 +77,8 @@ export async function GET(request: Request) {
     const depository = accounts.filter((a) => a.type === 'depository')
     const credit = accounts.filter((a) => a.type === 'credit')
 
-    const totalAssets = depository.reduce((sum, a) => sum + (Number(a.currentBalance) || 0), 0)
-    const totalLiabilities = credit.reduce((sum, a) => sum + Math.abs(Number(a.currentBalance) || 0), 0)
+    const totalAssets = depository.reduce((sum, a) => sum + (a.currentBalance || 0), 0)
+    const totalLiabilities = credit.reduce((sum, a) => sum + Math.abs(a.currentBalance || 0), 0)
     const netWorth = totalAssets - totalLiabilities
 
     // Group by type
@@ -96,8 +96,8 @@ export async function GET(request: Request) {
         totalAssets,
         totalLiabilities,
         netWorth,
-        totalChecking: grouped.checking.reduce((sum, a) => sum + (Number(a.availableBalance) || Number(a.currentBalance) || 0), 0),
-        totalSavings: grouped.savings.reduce((sum, a) => sum + (Number(a.availableBalance) || Number(a.currentBalance) || 0), 0),
+        totalChecking: grouped.checking.reduce((sum, a) => sum + (a.availableBalance || a.currentBalance || 0), 0),
+        totalSavings: grouped.savings.reduce((sum, a) => sum + (a.availableBalance || a.currentBalance || 0), 0),
       },
     })
   } catch (error) {

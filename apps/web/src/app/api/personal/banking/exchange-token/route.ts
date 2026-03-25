@@ -62,9 +62,9 @@ export async function POST(request: Request) {
       type: account.type,
       subtype: account.subtype || null,
       mask: account.mask || null,
-      currentBalance: String(account.balances.current),
-      availableBalance: String(account.balances.available),
-      creditLimit: account.balances.limit ? String(account.balances.limit) : null,
+      currentBalance: Number(account.balances.current),
+      availableBalance: Number(account.balances.available),
+      creditLimit: account.balances.limit ? Number(account.balances.limit) : null,
       isoCurrencyCode: account.balances.iso_currency_code || 'USD',
     }))
 

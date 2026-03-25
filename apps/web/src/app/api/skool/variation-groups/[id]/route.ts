@@ -38,8 +38,8 @@ export async function GET(
 
     const groupWithStats = {
       ...data,
-      postCount: Number(postResult?.value ?? 0),
-      schedulerCount: Number(schedulerResult?.value ?? 0),
+      postCount: postResult?.value ?? 0,
+      schedulerCount: schedulerResult?.value ?? 0,
     }
 
     return NextResponse.json({ group: groupWithStats })

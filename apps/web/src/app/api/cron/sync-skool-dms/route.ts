@@ -14,7 +14,7 @@ import {
   syncExtensionMessages,
   getEnabledSyncConfigs,
   type ExtensionSyncResult,
-} from '@/features/dm-sync'
+} from '@/features/dm-sync/server'
 import { SyncLogger } from '@/lib/sync-log'
 
 export const maxDuration = 300 // 5 minutes max for sync

@@ -81,7 +81,7 @@ async function fetchRevenueMetrics(): Promise<{
 
   // Get recurring from Skool
   const latestSnapshot = await getLatestRevenueSnapshot('fruitful')
-  const recurringCurrent = Number(latestSnapshot?.mrr || 0)
+  const recurringCurrent = latestSnapshot?.mrr || 0
 
   // Get previous month for comparison
   const previousMonthEnd = new Date(now.getFullYear(), now.getMonth(), 0)
@@ -103,7 +103,7 @@ async function fetchRevenueMetrics(): Promise<{
     ))
 
   const oneTimeCurrent =
-    currentTransactions.reduce((sum, t) => sum + Number(t.amount), 0) || 0
+    currentTransactions.reduce((sum, t) => sum + (t.amount || 0), 0)
 
   return {
     total: recurringCurrent + oneTimeCurrent,
@@ -134,8 +134,8 @@ async function fetchLeadsMetrics(): Promise<{
       lte(contacts.createdAt, endOfPrevMonth)
     ))
 
-  const current = Number(currentCount || 0)
-  const previous = Number(prevCount || 0)
+  const current = currentCount || 0
+  const previous = prevCount || 0
   const change = previous > 0 ? ((current - previous) / previous) * 100 : 0
 
   return { count: current, change }
@@ -153,9 +153,9 @@ async function fetchClientsMetrics(): Promise<{
     .where(eq(contacts.currentStage, 'premium'))
 
   return {
-    count: Number(vipCount || 0) + Number(premiumCount || 0),
-    vip: Number(vipCount || 0),
-    premium: Number(premiumCount || 0),
+    count: (vipCount || 0) + (premiumCount || 0),
+    vip: vipCount || 0,
+    premium: premiumCount || 0,
   }
 }
 
@@ -170,14 +170,14 @@ async function fetchSkoolMetrics(): Promise<{
   const [{ count: totalMembers }] = await db.select({ count: count() }).from(skoolMembers)
     .where(eq(skoolMembers.groupSlug, 'fruitful'))
 
-  const payingMembers = Number(latestSnapshot?.payingMembers || 0)
-  const members = Number(totalMembers || 0)
+  const payingMembers = latestSnapshot?.payingMembers || 0
+  const members = totalMembers || 0
 
   return {
     members,
     payingMembers,
     conversion: members > 0 ? (payingMembers / members) * 100 : 0,
-    retention: Number(latestSnapshot?.retentionRate || 0),
+    retention: latestSnapshot?.retentionRate || 0,
   }
 }
 
@@ -195,7 +195,7 @@ async function fetchFundedAmount(): Promise<{
     ))
 
   const amount =
-    fundingTransactions.reduce((sum, t) => sum + Number(t.amount), 0) || 0
+    fundingTransactions.reduce((sum, t) => sum + (t.amount || 0), 0)
   const txCount = fundingTransactions.length
 
   return { amount, count: txCount }
@@ -221,7 +221,7 @@ async function fetchAdSpend(): Promise<{
     ))
 
   const totalSpend =
-    adMetricsData.reduce((sum, m) => sum + Number(m.spend || 0), 0) || 0
+    adMetricsData.reduce((sum, m) => sum + (m.spend || 0), 0)
 
   // Get leads count for cost per lead calculation
   const leads = await fetchLeadsMetrics()

@@ -38,7 +38,7 @@ export async function GET(request: Request) {
     const startDateStr = startDate.toISOString().split('T')[0]
     const endDateStr = endDate.toISOString().split('T')[0]
 
-    // Parallel fetch all data
+    // Group 1: Core dimensions & aggregates
     const [
       aggregatesData,
       dimensionSourcesData,
@@ -46,10 +46,6 @@ export async function GET(request: Request) {
       dimensionCampaignsData,
       dimensionExpenseCategoriesData,
       weeklyTrendsData,
-      dailyExpensesData,
-      skoolMetrics,
-      revenueSnapshot,
-      contactStageCountsData,
     ] = await Promise.all([
       // 1. Daily aggregates for the period
       db.select().from(dailyAggregatesTable)
@@ -99,8 +95,16 @@ export async function GET(request: Request) {
       db.select().from(weeklyTrendsTable)
         .where(and(gte(weeklyTrendsTable.weekStart, startDateStr), lte(weeklyTrendsTable.weekStart, endDateStr)))
         .orderBy(asc(weeklyTrendsTable.weekStart)),
+    ])
 
-      // 4. Daily expenses by category
+    // Group 2: Supplementary data
+    const [
+      dailyExpensesData,
+      skoolMetrics,
+      revenueSnapshot,
+      contactStageCountsData,
+    ] = await Promise.all([
+      // Daily expenses by category
       db.select({
         date: dailyExpensesByCategory.date,
         category: dailyExpensesByCategory.category,
@@ -111,21 +115,21 @@ export async function GET(request: Request) {
         .where(and(gte(dailyExpensesByCategory.date, startDateStr), lte(dailyExpensesByCategory.date, endDateStr)))
         .orderBy(asc(dailyExpensesByCategory.date)),
 
-      // 5. Skool metrics (latest snapshot)
+      // Skool metrics (latest snapshot)
       getLatestMetrics(),
 
-      // 6. Revenue snapshot
+      // Revenue snapshot
       getLatestRevenueSnapshot(),
 
-      // 7. Contact stage counts (for funnel - uses stages array)
+      // Contact stage counts (for funnel - uses stages array)
       db.select({ stages: contactsTable.stages }).from(contactsTable),
     ])
 
-    const aggregates = aggregatesData as unknown as DailyAggregate[]
+    const aggregates = aggregatesData as DailyAggregate[]
 
     // Calculate stage counts from contacts' stages arrays (tags accumulate)
     const stageCountsMap: Record<string, number> = {}
-    for (const contact of contactStageCountsData as { stages: string[] | null }[]) {
+    for (const contact of contactStageCountsData) {
       const stages = contact.stages || []
       for (const stage of stages) {
         if (stage) {
@@ -135,7 +139,7 @@ export async function GET(request: Request) {
     }
 
     // Build dimension stages with live counts
-    const dimensionStagesWithCounts = dimensionStagesData.map((stage: typeof dimensionStagesData[number]) => ({
+    const dimensionStagesWithCounts = dimensionStagesData.map((stage) => ({
       ...stage,
       contactCount: stageCountsMap[stage.stage!] || stage.contactCount || 0,
     }))
@@ -180,7 +184,7 @@ export async function GET(request: Request) {
     const weeklyTrendsBySource: Record<string, WeeklyTrend[]> = {}
     const overallWeeklyTrends: WeeklyTrend[] = []
 
-    for (const trend of weeklyTrendsData as unknown as WeeklyTrend[]) {
+    for (const trend of weeklyTrendsData as WeeklyTrend[]) {
       if (!trend.source && !trend.campaignId) {
         overallWeeklyTrends.push(trend)
       } else if (trend.source && !trend.campaignId) {
@@ -196,7 +200,7 @@ export async function GET(request: Request) {
     const dailyExpensesTotal: { date: string; amount: number }[] = []
     const dailyExpensesMap = new Map<string, number>()
 
-    for (const expense of dailyExpensesData as unknown as DailyExpenseByCategory[]) {
+    for (const expense of dailyExpensesData as DailyExpenseByCategory[]) {
       if (!expensesByCategory[expense.category]) {
         expensesByCategory[expense.category] = []
       }
@@ -204,7 +208,7 @@ export async function GET(request: Request) {
 
       // Sum by date
       const current = dailyExpensesMap.get(expense.date) || 0
-      dailyExpensesMap.set(expense.date, current + Number(expense.amount))
+      dailyExpensesMap.set(expense.date, current + (expense.amount || 0))
     }
 
     // Convert to sorted array
@@ -228,7 +232,7 @@ export async function GET(request: Request) {
         sources: dimensionSourcesData as DimensionSource[],
         stages: dimensionStagesWithCounts as DimensionStage[],
         campaigns: dimensionCampaignsData as DimensionCampaign[],
-        expenseCategories: dimensionExpenseCategoriesData as unknown as DimensionExpenseCategory[],
+        expenseCategories: dimensionExpenseCategoriesData as DimensionExpenseCategory[],
       },
       funnel: {
         stages: funnelStages,
@@ -244,7 +248,7 @@ export async function GET(request: Request) {
       expenses: {
         byCategory: expensesByCategory,
         dailyTotal: dailyExpensesTotal,
-        categories: dimensionExpenseCategoriesData as unknown as DimensionExpenseCategory[],
+        categories: dimensionExpenseCategoriesData as DimensionExpenseCategory[],
       },
       skool: skoolMetrics
         ? {

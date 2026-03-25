@@ -163,7 +163,7 @@ function mapTransactionToRecord(txn: GHLTransaction) {
     ghlSubscriptionId: txn.subscriptionId || null,
     contactName: txn.contactName || null,
     contactEmail: txn.contactEmail || null,
-    amount: String(txn.amount), // numeric columns expect string
+    amount: Number(txn.amount),
     currency: txn.currency || 'USD',
     status: txn.status,
     entityType: txn.entityType || null,

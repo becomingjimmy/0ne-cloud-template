@@ -135,7 +135,7 @@ export async function GET(request: Request) {
     const usedLegacyColumns = false
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const safeRows = rows as unknown as Record<string, unknown>[]
+    const safeRows = rows as Record<string, unknown>[]
 
     const accountDaily = await db
       .select({
@@ -160,17 +160,17 @@ export async function GET(request: Request) {
       accountDaily.map((row) => [
         row.date as string,
         {
-          reach: Number(row.reach) || 0,
-          frequency: Number(row.frequency) || 0,
-          uniqueClicks: Number(row.uniqueClicks) || 0,
-          impressions: Number(row.impressions) || 0,
-          clicks: Number(row.clicks) || 0,
-          spend: Number(row.spend) || 0,
+          reach: row.reach || 0,
+          frequency: row.frequency || 0,
+          uniqueClicks: row.uniqueClicks || 0,
+          impressions: row.impressions || 0,
+          clicks: row.clicks || 0,
+          spend: row.spend || 0,
         },
       ])
     )
 
-    const accountImpressionsTotal = accountDaily.reduce((sum, row) => sum + (Number(row.impressions) || 0), 0)
+    const accountImpressionsTotal = accountDaily.reduce((sum, row) => sum + (row.impressions || 0), 0)
 
     const dailyMap = new Map<string, Record<string, number>>()
 
