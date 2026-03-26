@@ -2,7 +2,7 @@
  * POST /api/telemetry/report
  *
  * Receives telemetry events from 0ne Doctor and Install Wizard.
- * Stores structured results in Supabase for install analytics and improvement.
+ * Stores structured results in Neon (PostgreSQL) for install analytics and improvement.
  * Auto-detects failure patterns and returns known fixes when available.
  *
  * Auth: Bearer token (TELEMETRY_API_KEY env var)

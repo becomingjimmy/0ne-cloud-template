@@ -49,14 +49,18 @@ self.addEventListener("fetch", (event) => {
 // Push notification handlers (ready for future use)
 self.addEventListener("push", (event) => {
   if (!event.data) return;
-  const data = event.data.json();
-  event.waitUntil(
-    self.registration.showNotification(data.title || "0ne", {
-      body: data.body || "",
-      icon: "/icons/icon-192x192.png",
-      badge: "/icons/icon-192x192.png",
-    })
-  );
+  try {
+    const data = event.data.json();
+    event.waitUntil(
+      self.registration.showNotification(data.title || "0ne", {
+        body: data.body || "",
+        icon: "/icons/icon-192x192.png",
+        badge: "/icons/icon-192x192.png",
+      })
+    );
+  } catch (err) {
+    console.error("[sw] Failed to parse push payload:", err);
+  }
 });
 
 self.addEventListener("notificationclick", (event) => {

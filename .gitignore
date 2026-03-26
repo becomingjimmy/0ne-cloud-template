@@ -46,3 +46,6 @@ bun.lockb
 # Skool auth cookies (sensitive)
 .skool-cookies.json
 scripts/.skool-cookies.json
+
+# Template zip (large binary)
+private/0ne.zip

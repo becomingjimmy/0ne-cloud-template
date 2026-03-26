@@ -70,9 +70,9 @@ export default function InformationSecurityPolicy() {
                 The 0ne Cloud web application hosted on Vercel
                 (app.0neos.com).
               </li>
-              <li>The Supabase PostgreSQL database and all stored data.</li>
+              <li>The Neon PostgreSQL database and all stored data.</li>
               <li>
-                All third-party integrations (Plaid, Clerk, Supabase, Vercel).
+                All third-party integrations (Plaid, Clerk, Neon, Vercel).
               </li>
               <li>
                 All API endpoints, cron jobs, and external-facing services.
@@ -98,7 +98,7 @@ export default function InformationSecurityPolicy() {
               <li>
                 <strong>Encryption at Rest:</strong> Plaid access tokens are
                 encrypted using AES-256-CBC with a dedicated encryption key
-                before storage. The Supabase PostgreSQL database encrypts all
+                before storage. The Neon PostgreSQL database encrypts all
                 data at rest.
               </li>
               <li>
@@ -145,7 +145,7 @@ export default function InformationSecurityPolicy() {
               </li>
               <li>
                 <strong>Infrastructure Access:</strong> Access to Vercel,
-                Supabase, and GitHub is restricted to the sole operator with MFA
+                Neon, and GitHub is restricted to the sole operator with MFA
                 enabled on all accounts.
               </li>
             </ul>
@@ -191,9 +191,9 @@ export default function InformationSecurityPolicy() {
                 and MFA.
               </li>
               <li>
-                <strong>Supabase:</strong> Managed PostgreSQL database. SOC 2
+                <strong>Neon:</strong> Serverless PostgreSQL database. SOC 2
                 Type II certified. Provides encryption at rest, automated
-                backups, and row-level security.
+                backups, and branching for safe migrations.
               </li>
               <li>
                 <strong>Vercel:</strong> Application hosting and deployment. SOC
@@ -254,7 +254,7 @@ export default function InformationSecurityPolicy() {
             <ul className="list-disc pl-6 space-y-2">
               <li>
                 Multi-factor authentication (MFA) is enabled on all
-                infrastructure accounts (GitHub, Vercel, Supabase, Clerk
+                infrastructure accounts (GitHub, Vercel, Neon, Clerk
                 dashboard, Plaid dashboard).
               </li>
               <li>

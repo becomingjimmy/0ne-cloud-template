@@ -94,7 +94,7 @@ export default function PrivacyPolicy() {
                 tokens are never exposed to the browser.
               </li>
               <li>
-                Our database (Supabase PostgreSQL) enforces row-level security
+                Our database (Neon PostgreSQL) enforces row-level security
                 policies and encrypts data at rest.
               </li>
               <li>
@@ -128,7 +128,7 @@ export default function PrivacyPolicy() {
                 <strong>Clerk:</strong> For authentication and user management.
               </li>
               <li>
-                <strong>Supabase:</strong> For secure database hosting.
+                <strong>Neon:</strong> For secure serverless database hosting.
               </li>
               <li>
                 <strong>Vercel:</strong> For application hosting and deployment.

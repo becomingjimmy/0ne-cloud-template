@@ -105,7 +105,7 @@ export default function AccessControlPolicy() {
                 infrastructure and production systems.
               </li>
               <li>
-                MFA is enabled on all administrative accounts (Vercel, Supabase,
+                MFA is enabled on all administrative accounts (Vercel, Neon,
                 Clerk, Plaid, GitHub).
               </li>
               <li>
@@ -120,8 +120,8 @@ export default function AccessControlPolicy() {
             </h3>
             <ul className="list-disc pl-6 space-y-2">
               <li>
-                <strong>Supabase Service Role Key:</strong> Used server-side only
-                for operations that require bypassing RLS (e.g., cron jobs,
+                <strong>Database Connection String:</strong> Used server-side only
+                for database operations (e.g., cron jobs,
                 webhook processing). Never exposed to the client.
               </li>
               <li>
@@ -187,20 +187,14 @@ export default function AccessControlPolicy() {
                 matches their authenticated Clerk user ID.
               </li>
               <li>
-                <strong>Anon Key (Client-Side):</strong> The Supabase anonymous
-                key is used for client-side queries and is restricted by RLS
-                policies. It cannot bypass row-level restrictions.
-              </li>
-              <li>
-                <strong>Service Role Key (Server-Side):</strong> The Supabase
-                service role key bypasses RLS and is restricted to server-side
-                code only (API routes, cron handlers, webhook processors). It is
-                never exposed in client bundles.
+                <strong>Server-Side Only:</strong> All database queries run
+                server-side via Drizzle ORM. No database credentials or
+                connection strings are exposed in client bundles.
               </li>
               <li>
                 <strong>Direct Database Access:</strong> Direct SQL access to the
                 production database is restricted to the sole operator via
-                Supabase&apos;s dashboard (MFA-protected) or authenticated
+                Neon&apos;s dashboard (MFA-protected) or authenticated
                 connection strings.
               </li>
             </ul>
@@ -260,8 +254,8 @@ export default function AccessControlPolicy() {
                 name, session tokens). No access to financial data.
               </li>
               <li>
-                <strong>Supabase:</strong> Hosts the PostgreSQL database.
-                Supabase staff may access infrastructure for support purposes
+                <strong>Neon:</strong> Hosts the serverless PostgreSQL database.
+                Neon staff may access infrastructure for support purposes
                 under their SOC 2 obligations but do not have application-level
                 access to user data.
               </li>
@@ -367,7 +361,7 @@ export default function AccessControlPolicy() {
               <li>
                 <strong>Annually:</strong> Full review of this access control
                 policy. Audit all database RLS policies for correctness. Review
-                Plaid, Clerk, Supabase, and Vercel access configurations.
+                Plaid, Clerk, Neon, and Vercel access configurations.
               </li>
               <li>
                 <strong>Event-Driven:</strong> Immediate review following any
