@@ -911,7 +911,7 @@ export default function ExpensesPage() {
                         ),
                       },
                       {
-                        key: 'expense_count',
+                        key: 'expenseCount',
                         header: 'Expenses',
                         align: 'right',
                         render: (value) => value as number,

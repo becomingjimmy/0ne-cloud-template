@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { requireAuth, AuthError } from '@/lib/auth-helpers'
-import { db, eq, gte, lte, lt, and, or, inArray, isNull, asc, count } from '@0ne/db/server'
+import { db, eq, gte, lte, lt, and, asc, count } from '@0ne/db/server'
 import { skoolMembers, skoolMembersDaily } from '@0ne/db/server'
+import { buildSourceFilter } from '@/features/kpi/lib'
 
 /**
  * Query skool_members directly when filtering by attribution source.
@@ -13,22 +14,7 @@ async function getFilteredBySource(
   sources: string[],
   range: string
 ): Promise<NextResponse> {
-  // Handle null sources: if sources includes 'unknown', we need to include NULL attribution_source
-  const includesUnknown = sources.includes('unknown') || sources.includes('null')
-  const regularSources = sources.filter(s => s !== 'unknown' && s !== 'null')
-
-  // Build source filter condition
-  const buildSourceFilter = () => {
-    if (includesUnknown && regularSources.length > 0) {
-      return or(inArray(skoolMembers.attributionSource, regularSources), isNull(skoolMembers.attributionSource))
-    } else if (includesUnknown) {
-      return isNull(skoolMembers.attributionSource)
-    } else {
-      return inArray(skoolMembers.attributionSource, regularSources)
-    }
-  }
-
-  const sourceFilter = buildSourceFilter()
+  const sourceFilter = buildSourceFilter(sources)
 
   // Build query for members with join date in range
   const members = await db
@@ -145,7 +131,7 @@ async function getFilteredBySource(
       startMembers: earliestCount,
       newMembersInPeriod: totalNewMembers,
       avgDailyMembers,
-      growth: earliestCount > 0 ? ((latestCount - earliestCount) / earliestCount * 100).toFixed(1) : 0,
+      growth: earliestCount > 0 ? Number(((latestCount - earliestCount) / earliestCount * 100).toFixed(1)) : 0,
     },
     period: {
       range,
@@ -281,7 +267,7 @@ export async function GET(request: NextRequest) {
         startMembers: earliestCount,
         newMembersInPeriod: totalNewMembers,
         avgDailyMembers,
-        growth: earliestCount > 0 ? ((latestCount - earliestCount) / earliestCount * 100).toFixed(1) : 0,
+        growth: earliestCount > 0 ? Number(((latestCount - earliestCount) / earliestCount * 100).toFixed(1)) : 0,
       },
       period: {
         range,

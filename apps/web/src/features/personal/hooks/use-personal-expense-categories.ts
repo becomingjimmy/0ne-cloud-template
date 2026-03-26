@@ -15,7 +15,7 @@ export interface PersonalExpenseCategoryData {
   display_order: number
   created_at: string
   updated_at: string
-  expense_count: number
+  expenseCount: number
 }
 
 export interface PersonalExpenseCategoriesResponse {

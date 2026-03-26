@@ -718,7 +718,7 @@ export default function PersonalExpensesPage() {
                         ),
                       },
                       {
-                        key: 'expense_count',
+                        key: 'expenseCount',
                         header: 'Expenses',
                         align: 'right' as const,
                         render: (value) => value as number,

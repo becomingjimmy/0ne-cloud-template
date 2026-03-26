@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server'
 import { auth } from '@clerk/nextjs/server'
-import { db, eq, gte, lte, lt, and, or, inArray, isNull, asc, count } from '@0ne/db/server'
+import { db, eq, gte, lte, lt, and, inArray, isNull, asc, count } from '@0ne/db/server'
 import { dailyAggregates, contacts, skoolAboutPageDaily, skoolMembersDaily, skoolMembers } from '@0ne/db/server'
 import {
   FUNNEL_STAGE_ORDER,
@@ -8,7 +8,7 @@ import {
   STAGE_COLORS,
   type FunnelStage,
 } from '@/features/kpi/lib/config'
-import { parseDateRange, calculateChange } from '@/features/kpi/lib'
+import { parseDateRange, calculateChange, sumField, buildSourceFilter } from '@/features/kpi/lib'
 import { getLatestMetrics } from '@/features/skool/lib/metrics-sync'
 import { getLatestRevenueSnapshot } from '@/features/skool/lib/revenue-sync'
 
@@ -135,20 +135,7 @@ export async function GET(request: Request) {
 
     if (sources.length > 0) {
       // Source filtering - query skool_members directly
-      const includesUnknown = sources.includes('unknown') || sources.includes('null')
-      const regularSources = sources.filter(s => s !== 'unknown' && s !== 'null')
-
-      // Build source filter condition
-      const buildSourceFilter = () => {
-        if (includesUnknown && regularSources.length > 0) {
-          return or(inArray(skoolMembers.attributionSource, regularSources), isNull(skoolMembers.attributionSource))
-        } else if (includesUnknown) {
-          return isNull(skoolMembers.attributionSource)
-        } else {
-          return inArray(skoolMembers.attributionSource, regularSources)
-        }
-      }
-      const sourceFilter = buildSourceFilter()
+      const sourceFilter = buildSourceFilter(sources)
 
       // Get new members in period with source filter
       const [{ value: newCount }] = await db
@@ -265,12 +252,6 @@ export async function GET(request: Request) {
       ? (newMembersInPeriod / filteredAboutVisits) * 100
       : 0
     // Calculate metrics
-    const sumField = (data: typeof currentAggregates, field: keyof typeof currentAggregates[number]): number =>
-      data.reduce((sum, row) => {
-        const val = row[field]
-        return sum + (typeof val === 'number' ? val : 0)
-      }, 0)
-
     const currentRevenue = sumField(currentAggregates, 'totalRevenue')
     const previousRevenue = sumField(previousAggregates, 'totalRevenue')
     const currentLeads = sumField(currentAggregates, 'newLeads')

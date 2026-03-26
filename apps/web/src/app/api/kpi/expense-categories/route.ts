@@ -11,11 +11,11 @@ export interface ExpenseCategoryRecord {
   slug: string
   color: string | null
   description: string | null
-  is_system: boolean
-  display_order: number
-  created_at: string
-  updated_at: string
-  expense_count?: number
+  isSystem: boolean
+  displayOrder: number
+  createdAt: string
+  updatedAt: string
+  expenseCount?: number
 }
 
 /**
@@ -50,7 +50,7 @@ export async function GET(request: Request) {
     // Attach counts to categories
     const categoriesWithCounts = categories.map((cat) => ({
       ...cat,
-      expense_count: countMap.get(cat.name.toLowerCase()) || countMap.get(cat.slug) || 0,
+      expenseCount: countMap.get(cat.name.toLowerCase()) || countMap.get(cat.slug) || 0,
     }))
 
     return NextResponse.json({
@@ -183,7 +183,7 @@ export async function PUT(request: Request) {
     }
 
     // Prepare update object
-    const updates: Record<string, unknown> = {}
+    const updates: Partial<{ name: string; slug: string; color: string | null; description: string | null }> = {}
 
     if (name !== undefined && name !== existing.name) {
       if (typeof name !== 'string' || name.trim().length === 0) {

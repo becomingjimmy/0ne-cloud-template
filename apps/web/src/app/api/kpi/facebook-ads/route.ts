@@ -2,13 +2,9 @@ import { NextResponse } from 'next/server'
 import { auth } from '@clerk/nextjs/server'
 import { db, eq, gte, lte, and, or, inArray } from '@0ne/db/server'
 import { adMetrics, metaAccountDaily, campaigns } from '@0ne/db/server'
-import { parseDateRange } from '@/features/kpi/lib'
+import { parseDateRange, sumField } from '@/features/kpi/lib'
 
 export const dynamic = 'force-dynamic'
-
-function sumField<T extends Record<string, unknown>>(rows: T[], field: keyof T & string): number {
-  return rows.reduce((sum, row) => sum + (Number(row[field]) || 0), 0)
-}
 
 export async function GET(request: Request) {
   const { userId } = await auth()

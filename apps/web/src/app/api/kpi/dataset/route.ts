@@ -265,12 +265,22 @@ export async function GET(request: Request) {
     }
 
     // Build funnel stages with colors and labels for immediate UI use
-    const funnelStages = FUNNEL_STAGE_ORDER.map((stageId) => ({
-      id: stageId,
-      name: STAGE_LABELS[stageId],
-      color: STAGE_COLORS[stageId],
-      count: stageCountsMap[stageId] || 0,
-    }))
+    const reversedStages = [...FUNNEL_STAGE_ORDER].reverse()
+    const funnelStages = reversedStages.map((stageId, index, arr) => {
+      const stageCount = stageCountsMap[stageId] || 0
+      const previousStageCount = index > 0 ? (stageCountsMap[arr[index - 1]] || 0) : null
+      const conversionRate = previousStageCount && previousStageCount > 0
+        ? Number(((stageCount / previousStageCount) * 100).toFixed(1))
+        : null
+
+      return {
+        id: stageId,
+        name: STAGE_LABELS[stageId],
+        color: STAGE_COLORS[stageId],
+        count: stageCount,
+        conversionRate,
+      }
+    })
 
     // Coerce weekly trends nulls to defaults
     const weeklyTrends: WeeklyTrend[] = weeklyTrendsData.map((r) => ({

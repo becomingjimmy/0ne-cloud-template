@@ -305,7 +305,7 @@ export interface MembersDailyData {
   totalMembers: number
   activeMembers: number | null
   newMembers: number
-  source: string
+  source: string | null
 }
 
 export interface MembersMonthlyData {
@@ -323,7 +323,7 @@ export interface MembersAnalyticsData {
     startMembers: number
     newMembersInPeriod: number
     avgDailyMembers: number
-    growth: string | number
+    growth: number
   }
   period: {
     range: string

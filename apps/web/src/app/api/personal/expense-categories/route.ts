@@ -35,7 +35,7 @@ export async function GET(request: Request) {
     // Attach counts to categories
     const categoriesWithCounts = categories.map((cat) => ({
       ...cat,
-      expense_count: countMap.get(cat.name.toLowerCase()) || countMap.get(cat.slug) || 0,
+      expenseCount: countMap.get(cat.name.toLowerCase()) || countMap.get(cat.slug) || 0,
     }))
 
     return NextResponse.json({

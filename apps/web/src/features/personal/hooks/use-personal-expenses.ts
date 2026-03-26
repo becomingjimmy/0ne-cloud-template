@@ -135,7 +135,11 @@ export async function addPersonalExpense(expense: {
     body: JSON.stringify(expense),
   })
 
-  return response.json()
+  const data = await response.json()
+  if (!response.ok) {
+    return { success: false, error: data.error || 'Failed to add expense' }
+  }
+  return data
 }
 
 /**
@@ -156,7 +160,11 @@ export async function updatePersonalExpense(expense: {
     body: JSON.stringify(expense),
   })
 
-  return response.json()
+  const data = await response.json()
+  if (!response.ok) {
+    return { success: false, error: data.error || 'Failed to update expense' }
+  }
+  return data
 }
 
 /**
@@ -169,7 +177,11 @@ export async function togglePersonalExpense(id: string, is_active: boolean): Pro
     body: JSON.stringify({ id, is_active }),
   })
 
-  return response.json()
+  const data = await response.json()
+  if (!response.ok) {
+    return { success: false, error: data.error || 'Failed to toggle expense' }
+  }
+  return data
 }
 
 /**
@@ -180,5 +192,9 @@ export async function deletePersonalExpense(id: string): Promise<{ success: bool
     method: 'DELETE',
   })
 
-  return response.json()
+  const data = await response.json()
+  if (!response.ok) {
+    return { success: false, error: data.error || 'Failed to delete expense' }
+  }
+  return data
 }

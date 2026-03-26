@@ -1,4 +1,4 @@
-import { Configuration, PlaidApi, PlaidEnvironments, Products, CountryCode } from 'plaid'
+import { Configuration, PlaidApi, PlaidEnvironments, Products, CountryCode, type Transaction, type RemovedTransaction } from 'plaid'
 
 let _plaidClient: PlaidApi | null = null
 
@@ -45,9 +45,9 @@ export async function exchangePublicToken(publicToken: string) {
 }
 
 export async function syncTransactions(accessToken: string, cursor?: string | null) {
-  const allAdded: any[] = []
-  const allModified: any[] = []
-  const allRemoved: any[] = []
+  const allAdded: Transaction[] = []
+  const allModified: Transaction[] = []
+  const allRemoved: RemovedTransaction[] = []
   let hasMore = true
   let nextCursor = cursor || undefined
 
