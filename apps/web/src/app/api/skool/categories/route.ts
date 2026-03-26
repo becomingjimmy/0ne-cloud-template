@@ -80,7 +80,6 @@ export async function GET(request: NextRequest) {
       categories: FRUITFUL_FALLBACK_CATEGORIES,
       source: 'fallback',
       note: 'API error — using fallback categories.',
-      error: String(error),
     })
   }
 }

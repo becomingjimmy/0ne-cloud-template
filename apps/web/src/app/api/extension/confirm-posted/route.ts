@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { db, eq, rawSql } from '@0ne/db/server'
 import { skoolScheduledPosts, skoolPostLibrary, skoolPostExecutionLog, skoolOneoffPosts } from '@0ne/db/server'
 import { corsHeaders, validateExtensionApiKey } from '@/lib/extension-auth'
+import { safeErrorResponse } from '@/lib/security'
 
 export { OPTIONS } from '@/lib/extension-auth'
 
@@ -204,13 +205,6 @@ export async function POST(request: NextRequest) {
     }
   } catch (error) {
     console.error('[Extension API] POST exception:', error)
-    return NextResponse.json(
-      {
-        success: false,
-        message: '',
-        error: error instanceof Error ? error.message : 'Unknown error',
-      } as ConfirmPostedResponse,
-      { status: 500, headers: corsHeaders }
-    )
+    return safeErrorResponse('Failed to confirm post', error, 500, corsHeaders)
   }
 }

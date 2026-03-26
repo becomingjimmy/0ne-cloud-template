@@ -7,6 +7,7 @@
 
 import { NextResponse } from 'next/server'
 import { auth, currentUser } from '@clerk/nextjs/server'
+import { safeErrorResponse } from '@/lib/security'
 import { db, eq } from '@0ne/db/server'
 import { notificationPreferences } from '@0ne/db/server'
 import { sendDailySnapshot } from '@/features/notifications/lib/send-notification'
@@ -86,12 +87,6 @@ export async function POST(request: Request) {
     }
   } catch (error) {
     console.error('[api/settings/notifications/test] Error:', error)
-    return NextResponse.json(
-      {
-        success: false,
-        error: error instanceof Error ? error.message : 'Internal server error',
-      },
-      { status: 500 }
-    )
+    return safeErrorResponse('Failed to send test notification', error)
   }
 }

@@ -3,6 +3,7 @@ import { auth } from '@clerk/nextjs/server'
 import { getUserPermissions } from '@0ne/auth/permissions'
 import { db, eq } from '@0ne/db/server'
 import { invites } from '@0ne/db/server'
+import { safeErrorResponse } from '@/lib/security'
 
 export async function DELETE(
   _request: NextRequest,
@@ -24,6 +25,6 @@ export async function DELETE(
 
     return NextResponse.json({ success: true })
   } catch (error) {
-    return NextResponse.json({ error: String(error) }, { status: 500 })
+    return safeErrorResponse('Failed to revoke invite', error)
   }
 }

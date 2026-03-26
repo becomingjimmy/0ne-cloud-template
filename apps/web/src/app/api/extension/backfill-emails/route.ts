@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { db, eq, and, or, isNull, isNotNull, inArray, count } from '@0ne/db/server'
 import { skoolMembers, dmContactMappings, dmMessages, contactChannels } from '@0ne/db/server'
 import { corsHeaders, validateExtensionAuth } from '@/lib/extension-auth'
+import { safeErrorResponse } from '@/lib/security'
 import { GHLClient } from '@/features/kpi/lib/ghl-client'
 import { parseDisplayName } from '@/features/dm-sync/lib/contact-mapper'
 
@@ -452,9 +453,6 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ success: true, stats }, { headers: corsHeaders })
   } catch (error) {
     console.error('[Backfill] Exception:', error)
-    return NextResponse.json(
-      { error: error instanceof Error ? error.message : 'Unknown error' },
-      { status: 500, headers: corsHeaders }
-    )
+    return safeErrorResponse('Failed to backfill emails', error, 500, corsHeaders)
   }
 }

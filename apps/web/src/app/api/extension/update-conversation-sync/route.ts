@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@0ne/db/server'
 import { conversationSyncStatus } from '@0ne/db/server'
 import { corsHeaders, validateExtensionAuth } from '@/lib/extension-auth'
+import { safeErrorResponse } from '@/lib/security'
 
 export { OPTIONS } from '@/lib/extension-auth'
 
@@ -121,14 +122,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json(response, { headers: corsHeaders })
   } catch (error) {
     console.error('[Extension API] POST exception:', error)
-    return NextResponse.json(
-      {
-        success: false,
-        updated: false,
-        error: error instanceof Error ? error.message : 'Unknown error',
-      } as UpdateSyncStatusResponse,
-      { status: 500, headers: corsHeaders }
-    )
+    return safeErrorResponse('Failed to update conversation sync status', error, 500, corsHeaders)
   }
 }
 

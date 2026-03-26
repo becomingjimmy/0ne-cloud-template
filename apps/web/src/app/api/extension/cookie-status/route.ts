@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { db, eq } from '@0ne/db/server'
 import { extensionCookies } from '@0ne/db/server'
 import { corsHeaders, validateExtensionApiKey } from '@/lib/extension-auth'
+import { safeErrorResponse } from '@/lib/security'
 
 export { OPTIONS } from '@/lib/extension-auth'
 
@@ -100,16 +101,6 @@ export async function GET(request: NextRequest) {
     return NextResponse.json(response, { headers: corsHeaders })
   } catch (error) {
     console.error('[Extension API] GET exception:', error)
-    return NextResponse.json(
-      {
-        success: false,
-        hasValidCookies: false,
-        expiresAt: null,
-        expiringSoon: false,
-        hoursRemaining: null,
-        error: error instanceof Error ? error.message : 'Unknown error',
-      } as CookieStatusResponse,
-      { status: 500, headers: corsHeaders }
-    )
+    return safeErrorResponse('Failed to check cookie status', error, 500, corsHeaders)
   }
 }

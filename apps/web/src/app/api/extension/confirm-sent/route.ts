@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { db, eq } from '@0ne/db/server'
 import { dmMessages } from '@0ne/db/server'
 import { corsHeaders, validateExtensionAuth } from '@/lib/extension-auth'
+import { safeErrorResponse } from '@/lib/security'
 
 export { OPTIONS } from '@/lib/extension-auth'
 
@@ -121,13 +122,6 @@ export async function POST(request: NextRequest) {
     }
   } catch (error) {
     console.error('[Extension API] POST confirm-sent exception:', error)
-    return NextResponse.json(
-      {
-        success: false,
-        updated: false,
-        error: error instanceof Error ? error.message : 'Unknown error',
-      },
-      { status: 500, headers: corsHeaders }
-    )
+    return safeErrorResponse('Failed to confirm sent message', error, 500, corsHeaders)
   }
 }

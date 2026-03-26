@@ -6,6 +6,7 @@ import {
   isEncryptionConfigured,
 } from '@/lib/cookie-encryption'
 import { corsHeaders, validateExtensionApiKey } from '@/lib/extension-auth'
+import { safeErrorResponse } from '@/lib/security'
 
 export { OPTIONS } from '@/lib/extension-auth'
 
@@ -132,14 +133,6 @@ export async function POST(request: NextRequest) {
     return NextResponse.json(response, { headers: corsHeaders })
   } catch (error) {
     console.error('[Extension API] POST exception:', error)
-    return NextResponse.json(
-      {
-        success: false,
-        stored: false,
-        expiresAt: null,
-        error: error instanceof Error ? error.message : 'Unknown error',
-      } as PushCookiesResponse,
-      { status: 500, headers: corsHeaders }
-    )
+    return safeErrorResponse('Failed to store cookies', error, 500, corsHeaders)
   }
 }

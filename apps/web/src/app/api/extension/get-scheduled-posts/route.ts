@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { db, eq, and, lte, gte, asc, inArray } from '@0ne/db/server'
 import { skoolOneoffPosts, skoolScheduledPosts, skoolPostLibrary } from '@0ne/db/server'
 import { corsHeaders, validateExtensionAuth } from '@/lib/extension-auth'
+import { safeErrorResponse } from '@/lib/security'
 
 export { OPTIONS } from '@/lib/extension-auth'
 
@@ -209,13 +210,6 @@ export async function GET(request: NextRequest) {
     return NextResponse.json(response, { headers: corsHeaders })
   } catch (error) {
     console.error('[Extension API] GET exception:', error)
-    return NextResponse.json(
-      {
-        success: false,
-        posts: [],
-        error: error instanceof Error ? error.message : 'Unknown error',
-      } as GetScheduledPostsResponse,
-      { status: 500, headers: corsHeaders }
-    )
+    return safeErrorResponse('Failed to get scheduled posts', error, 500, corsHeaders)
   }
 }

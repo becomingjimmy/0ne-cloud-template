@@ -9,6 +9,7 @@
 
 import { NextRequest, NextResponse } from 'next/server'
 import { auth } from '@clerk/nextjs/server'
+import { safeErrorResponse } from '@/lib/security'
 import {
   updateStaffUser,
   deleteStaffUser,
@@ -72,13 +73,7 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
     })
   } catch (error) {
     console.error('[Staff Users API] PUT error:', error)
-    return NextResponse.json(
-      {
-        success: false,
-        error: error instanceof Error ? error.message : 'Unknown error',
-      },
-      { status: 500 }
-    )
+    return safeErrorResponse('Failed to update staff user', error)
   }
 }
 
@@ -104,12 +99,6 @@ export async function DELETE(_request: NextRequest, { params }: RouteParams) {
     })
   } catch (error) {
     console.error('[Staff Users API] DELETE error:', error)
-    return NextResponse.json(
-      {
-        success: false,
-        error: error instanceof Error ? error.message : 'Unknown error',
-      },
-      { status: 500 }
-    )
+    return safeErrorResponse('Failed to delete staff user', error)
   }
 }

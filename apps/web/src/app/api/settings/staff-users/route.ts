@@ -10,6 +10,7 @@
 
 import { NextRequest, NextResponse } from 'next/server'
 import { auth } from '@clerk/nextjs/server'
+import { safeErrorResponse } from '@/lib/security'
 import {
   getStaffUsers,
   createStaffUser,
@@ -39,13 +40,7 @@ export async function GET() {
     })
   } catch (error) {
     console.error('[Staff Users API] GET error:', error)
-    return NextResponse.json(
-      {
-        success: false,
-        error: error instanceof Error ? error.message : 'Unknown error',
-      },
-      { status: 500 }
-    )
+    return safeErrorResponse('Failed to fetch staff users', error)
   }
 }
 
@@ -108,12 +103,6 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    return NextResponse.json(
-      {
-        success: false,
-        error: error instanceof Error ? error.message : 'Unknown error',
-      },
-      { status: 500 }
-    )
+    return safeErrorResponse('Failed to create staff user', error)
   }
 }

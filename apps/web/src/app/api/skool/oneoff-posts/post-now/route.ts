@@ -9,6 +9,7 @@
 
 import { NextRequest, NextResponse } from 'next/server'
 import { requireAuth, AuthError } from '@/lib/auth-helpers'
+import { safeErrorResponse } from '@/lib/security'
 import { db, eq } from '@0ne/db/server'
 import { skoolOneoffPosts } from '@0ne/db/server'
 
@@ -68,9 +69,6 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: error.message }, { status: error.status })
     }
     console.error('[Post Now] Exception:', error)
-    return NextResponse.json(
-      { error: error instanceof Error ? error.message : 'Unknown error' },
-      { status: 500 }
-    )
+    return safeErrorResponse('Failed to queue post for publishing', error)
   }
 }

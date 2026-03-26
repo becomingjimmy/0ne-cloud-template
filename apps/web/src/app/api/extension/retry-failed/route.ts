@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { db, eq, and, inArray } from '@0ne/db/server'
 import { dmMessages } from '@0ne/db/server'
 import { corsHeaders, validateExtensionAuth } from '@/lib/extension-auth'
+import { safeErrorResponse } from '@/lib/security'
 
 export { OPTIONS } from '@/lib/extension-auth'
 
@@ -71,13 +72,6 @@ export async function POST(request: NextRequest) {
     }
   } catch (error) {
     console.error('[Extension API] POST retry-failed exception:', error)
-    return NextResponse.json(
-      {
-        success: false,
-        reset: 0,
-        error: error instanceof Error ? error.message : 'Unknown error',
-      },
-      { status: 500, headers: corsHeaders }
-    )
+    return safeErrorResponse('Failed to retry failed messages', error, 500, corsHeaders)
   }
 }

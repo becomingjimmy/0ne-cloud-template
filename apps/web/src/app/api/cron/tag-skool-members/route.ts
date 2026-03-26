@@ -8,6 +8,7 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server'
+import { safeErrorResponse } from '@/lib/security'
 import { db, and, isNull, isNotNull, asc } from '@0ne/db/server'
 import { skoolMembers } from '@0ne/db/server'
 import { GHLClient } from '@/features/kpi/lib/ghl-client'
@@ -110,12 +111,6 @@ export async function GET(request: NextRequest) {
     })
   } catch (error) {
     console.error('[tag-skool] Error:', error)
-    return NextResponse.json(
-      {
-        success: false,
-        error: error instanceof Error ? error.message : 'Unknown error',
-      },
-      { status: 500 }
-    )
+    return safeErrorResponse('Failed to tag Skool members', error)
   }
 }

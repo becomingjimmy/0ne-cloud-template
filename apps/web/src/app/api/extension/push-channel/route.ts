@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { db, eq, and, inArray } from '@0ne/db/server'
 import { contactChannels, dmMessages } from '@0ne/db/server'
 import { corsHeaders, validateExtensionAuth } from '@/lib/extension-auth'
+import { safeErrorResponse } from '@/lib/security'
 
 export { OPTIONS } from '@/lib/extension-auth'
 
@@ -115,13 +116,6 @@ export async function POST(request: NextRequest) {
     return NextResponse.json(response, { headers: corsHeaders })
   } catch (error) {
     console.error('[Extension API] POST push-channel exception:', error)
-    return NextResponse.json(
-      {
-        success: false,
-        cached: false,
-        error: error instanceof Error ? error.message : 'Unknown error',
-      },
-      { status: 500, headers: corsHeaders }
-    )
+    return safeErrorResponse('Failed to push channel data', error, 500, corsHeaders)
   }
 }

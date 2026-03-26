@@ -9,6 +9,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { db, eq } from '@0ne/db/server'
 import { skoolCategories } from '@0ne/db/server'
 import { corsHeaders, validateExtensionAuth } from '@/lib/extension-auth'
+import { safeErrorResponse } from '@/lib/security'
 
 export { OPTIONS } from '@/lib/extension-auth'
 
@@ -105,13 +106,6 @@ export async function POST(request: NextRequest) {
     return NextResponse.json(response, { headers: corsHeaders })
   } catch (error) {
     console.error('[Extension API] POST push-categories exception:', error)
-    return NextResponse.json(
-      {
-        success: false,
-        count: 0,
-        error: error instanceof Error ? error.message : 'Unknown error',
-      } as PushCategoriesResponse,
-      { status: 500, headers: corsHeaders }
-    )
+    return safeErrorResponse('Failed to push categories', error, 500, corsHeaders)
   }
 }

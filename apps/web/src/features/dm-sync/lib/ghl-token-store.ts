@@ -10,6 +10,7 @@
 
 import { db, eq } from '@0ne/db/server'
 import { dmSyncConfig } from '@0ne/db/server'
+import { encryptGhlToken, decryptGhlToken, isEncrypted } from '@/lib/ghl-encryption'
 
 // =============================================================================
 // TYPES
@@ -65,9 +66,12 @@ export async function getStoredTokens(
   // Check if tokens exist in database
   if (data.ghlRefreshToken) {
     console.log('[GHL Token Store] Using tokens from database')
+    // Decrypt tokens — handles both encrypted and legacy plaintext values
+    const rawAccess = data.ghlAccessToken || ''
+    const rawRefresh = data.ghlRefreshToken
     return {
-      accessToken: data.ghlAccessToken || '',
-      refreshToken: data.ghlRefreshToken,
+      accessToken: rawAccess && isEncrypted(rawAccess) ? decryptGhlToken(rawAccess) : rawAccess,
+      refreshToken: isEncrypted(rawRefresh) ? decryptGhlToken(rawRefresh) : rawRefresh,
       expiresAt: data.ghlTokenExpiresAt
         ? new Date(data.ghlTokenExpiresAt)
         : new Date(0),
@@ -118,8 +122,8 @@ export async function saveTokens(
   try {
     await db.update(dmSyncConfig)
       .set({
-        ghlAccessToken: tokens.accessToken,
-        ghlRefreshToken: tokens.refreshToken,
+        ghlAccessToken: encryptGhlToken(tokens.accessToken),
+        ghlRefreshToken: encryptGhlToken(tokens.refreshToken),
         ghlTokenExpiresAt: expiresAt,
         updatedAt: new Date(),
       })

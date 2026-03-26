@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { db, eq, and, isNull } from '@0ne/db/server'
 import { dmMessages, staffUsers, conversationSyncStatus, dmContactMappings } from '@0ne/db/server'
 import { corsHeaders, validateExtensionAuth } from '@/lib/extension-auth'
+import { safeErrorResponse } from '@/lib/security'
 
 export { OPTIONS } from '@/lib/extension-auth'
 
@@ -148,9 +149,6 @@ export async function POST(request: NextRequest) {
     )
   } catch (error) {
     console.error('[Extension API] push-conversation-names error:', error)
-    return NextResponse.json(
-      { error: error instanceof Error ? error.message : 'Unknown error' },
-      { status: 500, headers: corsHeaders }
-    )
+    return safeErrorResponse('Failed to push conversation names', error, 500, corsHeaders)
   }
 }
