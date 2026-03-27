@@ -4,7 +4,7 @@ import { useState } from 'react'
 import { useUser } from '@clerk/nextjs'
 import { AppShell } from '@/components/shell'
 import { Card, CardHeader, CardTitle, CardDescription, CardContent, Button } from '@0ne/ui'
-import { Rocket, Eye, EyeOff, Key } from 'lucide-react'
+import { Rocket, Eye, EyeOff } from 'lucide-react'
 
 export default function OnboardingSettingsPage() {
   const { user } = useUser()
@@ -55,39 +55,6 @@ export default function OnboardingSettingsPage() {
           </CardContent>
         </Card>
 
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <Key className="h-5 w-5" />
-              Feature API Keys
-            </CardTitle>
-            <CardDescription>
-              Some features need API keys. They are prompted when you first use each feature.
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            <div className="space-y-3 text-sm">
-              {[
-                { feature: 'Image Generation', key: 'Gemini API key', env: 'GEMINI_API_KEY' },
-                { feature: 'Research', key: 'Perplexity API key', env: 'PERPLEXITY_API_KEY' },
-                { feature: 'Social Scraping', key: 'Apify API token', env: 'APIFY_TOKEN' },
-                { feature: 'Slack Integration', key: 'Slack Bot Token', env: 'SLACK_BOT_TOKEN' },
-                { feature: 'Premium Voice', key: 'ElevenLabs API key', env: 'ELEVENLABS_API_KEY' },
-              ].map(({ feature, key, env }) => (
-                <div key={env} className="flex items-center justify-between py-2 border-b last:border-0">
-                  <div>
-                    <span className="font-medium">{feature}</span>
-                    <span className="text-muted-foreground ml-2">&rarr; {key}</span>
-                  </div>
-                  <code className="text-xs bg-muted px-2 py-0.5 rounded">{env}</code>
-                </div>
-              ))}
-            </div>
-            <p className="text-sm text-muted-foreground mt-4">
-              Set these in your <code className="bg-muted px-1 rounded">.env.local</code> file or Vercel environment variables.
-            </p>
-          </CardContent>
-        </Card>
       </div>
     </AppShell>
   )
