@@ -5,7 +5,7 @@ import { useSignIn, useAuth } from '@clerk/nextjs'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { Button, Input, Label } from '@0ne/ui'
-import { Loader2, AlertCircle } from 'lucide-react'
+import { Loader2, AlertCircle, Eye, EyeOff } from 'lucide-react'
 import { OAuthButtons } from '../../_components/oauth-buttons'
 
 export default function SignInPage() {
@@ -15,6 +15,7 @@ export default function SignInPage() {
 
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
+  const [showPassword, setShowPassword] = useState(false)
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
 
@@ -39,12 +40,30 @@ export default function SignInPage() {
       })
 
       if (result.status === 'complete') {
-        await setActive({ session: result.createdSessionId })
-        router.push('/')
+        try {
+          await setActive({ session: result.createdSessionId })
+          router.push('/')
+        } catch (sessionErr) {
+          console.error('[sign-in] Failed to activate session:', sessionErr)
+          setError('Sign-in succeeded but session activation failed. This domain may not be configured for authentication yet.')
+        }
+      } else if (result.status === 'needs_identifier') {
+        setError('Please enter your email address.')
+      } else if (result.status === 'needs_first_factor') {
+        setError('Please enter your password.')
+      } else {
+        setError(`Sign-in requires additional verification (status: ${result.status}). Please contact support.`)
       }
     } catch (err: unknown) {
-      const clerkError = err as { errors?: { message: string }[] }
-      setError(clerkError.errors?.[0]?.message || 'Invalid email or password')
+      const clerkError = err as { errors?: { message: string; code?: string }[] }
+      const firstError = clerkError.errors?.[0]
+      if (firstError?.code === 'form_password_incorrect') {
+        setError('Incorrect password. Please try again.')
+      } else if (firstError?.code === 'form_identifier_not_found') {
+        setError('No account found with this email address.')
+      } else {
+        setError(firstError?.message || 'Sign-in failed. Please try again.')
+      }
     } finally {
       setLoading(false)
     }
@@ -92,15 +111,31 @@ export default function SignInPage() {
         </div>
 
         <div className="space-y-2">
-          <Label htmlFor="password">Password</Label>
-          <Input
-            id="password"
-            type="password"
-            value={password}
-            onChange={e => setPassword(e.target.value)}
-            placeholder="Your password"
-            required
-          />
+          <div className="flex items-center justify-between">
+            <Label htmlFor="password">Password</Label>
+            <Link href="/sign-in/forgot-password" className="text-xs text-muted-foreground hover:text-primary">
+              Forgot password?
+            </Link>
+          </div>
+          <div className="relative">
+            <Input
+              id="password"
+              type={showPassword ? 'text' : 'password'}
+              value={password}
+              onChange={e => setPassword(e.target.value)}
+              placeholder="Your password"
+              required
+              className="pr-10"
+            />
+            <button
+              type="button"
+              onClick={() => setShowPassword(!showPassword)}
+              className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors"
+              tabIndex={-1}
+            >
+              {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+            </button>
+          </div>
         </div>
 
         <Button type="submit" className="w-full" disabled={loading}>

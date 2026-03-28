@@ -3,58 +3,54 @@ import { NextRequest, NextResponse } from 'next/server'
 import { canAccessApp, type AppId } from '@0ne/auth/permissions'
 
 // Marketing site paths served on the canonical root domain
-const MARKETING_PATHS = ['/', '/install', '/diy-install', '/download', '/privacy']
+const MARKETING_PATHS = ['/', '/install', '/diy-install', '/download', '/privacy', '/pricing', '/migrate', '/skills', '/preview']
 
-// Domain routing configuration — set NEXT_PUBLIC_APP_URL to match your deployment.
-// Assumes app.{domain} subdomain convention for split marketing/app routing.
-// For single-domain deployments (e.g., my-app.vercel.app), marketing routes are unused.
-let APP_HOSTNAME = 'localhost'
-let ROOT_DOMAIN = 'localhost'
-try {
-  APP_HOSTNAME = new URL(process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000').hostname
-  ROOT_DOMAIN = APP_HOSTNAME.replace(/^app\./, '')
-} catch {
-  // Malformed NEXT_PUBLIC_APP_URL — fall back to localhost (no domain routing)
-}
+// Derive the app's own hostname from NEXT_PUBLIC_APP_URL (set per-tenant by orchestrator)
+const APP_HOST = process.env.NEXT_PUBLIC_APP_URL
+  ? new URL(process.env.NEXT_PUBLIC_APP_URL).host
+  : 'app.0neos.com'
 
 function handleDomainRouting(request: NextRequest): NextResponse | null {
-  const hostname = request.headers.get('host')?.split(':')[0] || ''
+  const hostname = request.headers.get('host') || ''
   const { pathname } = request.nextUrl
 
-  // App subdomain — serve the app, no rewriting needed
-  if (hostname === APP_HOSTNAME) {
+  // This app's own domain — serve normally, no rewriting needed
+  if (hostname === APP_HOST) {
     return null
   }
 
-  // Root domain — canonical marketing domain
-  if (hostname === ROOT_DOMAIN || hostname === `www.${ROOT_DOMAIN}`) {
-    // API routes pass through (download API, etc.)
-    if (pathname.startsWith('/api/')) {
-      return NextResponse.next()
-    }
-    // Marketing paths get rewritten to /site/*
-    if (MARKETING_PATHS.includes(pathname) || pathname.startsWith('/site')) {
-      if (pathname.startsWith('/site')) {
+  // Control plane marketing domain routing (only on the control plane instance)
+  if (APP_HOST === 'app.0neos.com') {
+    if (hostname === '0neos.com' || hostname === 'www.0neos.com') {
+      // API routes pass through (download API, etc.)
+      if (pathname.startsWith('/api/')) {
         return NextResponse.next()
       }
+      // Marketing paths get rewritten to /site/*
+      if (MARKETING_PATHS.includes(pathname) || pathname.startsWith('/site')) {
+        if (pathname.startsWith('/site')) {
+          return NextResponse.next()
+        }
+        const url = request.nextUrl.clone()
+        url.pathname = `/site${pathname === '/' ? '' : pathname}`
+        return NextResponse.rewrite(url)
+      }
+      // Non-marketing paths on root domain → redirect to app subdomain
       const url = request.nextUrl.clone()
-      url.pathname = `/site${pathname === '/' ? '' : pathname}`
-      return NextResponse.rewrite(url)
+      url.host = 'app.0neos.com'
+      return NextResponse.redirect(url, 307)
     }
-    // Non-marketing paths on root domain → redirect to app subdomain
-    const url = request.nextUrl.clone()
-    url.host = APP_HOSTNAME
-    return NextResponse.redirect(url, 307)
+
+    // ALL other domains on control plane → 301 permanent redirect to 0neos.com
+    if (hostname !== 'localhost' && hostname !== 'localhost:3000') {
+      const url = request.nextUrl.clone()
+      url.host = '0neos.com'
+      url.port = ''
+      return NextResponse.redirect(url, 301)
+    }
   }
 
-  // ALL other domains → 301 permanent redirect to root domain
-  if (hostname !== 'localhost') {
-    const url = request.nextUrl.clone()
-    url.host = ROOT_DOMAIN
-    url.port = ''
-    return NextResponse.redirect(url, 301)
-  }
-
+  // Tenant instances: any hostname is fine (Vercel handles routing)
   return null
 }
 
@@ -66,7 +62,6 @@ const isPublicRoute = createRouteMatcher([
   '/privacy',
   '/security-policy',
   '/access-control',
-  '/subscription-required', // Paywall page (must be accessible to blocked users)
   '/site(.*)', // Marketing site pages (no auth)
   '/api/public(.*)',
   '/api/cron(.*)',
@@ -75,21 +70,16 @@ const isPublicRoute = createRouteMatcher([
   '/api/extension(.*)', // Chrome extension uses API key auth
   '/api/auth(.*)', // OAuth callbacks
   '/api/webhooks(.*)', // Webhooks from external services
+  '/api/billing/webhooks', // Stripe billing webhooks (signature verified in handler)
   '/api/widget(.*)', // Widget API uses its own token auth
   '/api/admin/invites/validate', // Invite validation (pre-auth)
+  '/api/migrate/validate', // Legacy install migration (pre-auth, token-verified)
+  '/api/health', // Instance health check (public, no auth)
+  '/api/supdate/check', // Version check (token auth, not Clerk)
+  '/api/skills/registry', // Skill marketplace — public catalog browsing
+  '/api/skills/marketplace.json', // Anthropic-compatible marketplace manifest
+  '/api/skills/(.*)/download', // Skill download — uses its own Bearer auth
 ])
-
-// Statuses that grant access. All others (canceled, past_due, paused, undefined) block.
-const ACTIVE_SUBSCRIPTION_STATUSES = ['active', 'trialing', 'comped']
-
-// Routes exempt from the subscription paywall (user needs access even when blocked)
-const SUBSCRIPTION_EXEMPT_ROUTES = [
-  '/api/',          // API routes have their own auth
-  '/settings',      // Let users see their account/status
-  '/sign-out',      // Must be able to sign out
-  '/onboarding',    // Onboarding flow
-  '/get-started',   // Initial setup
-]
 
 const appRoutes: Record<string, AppId> = {
   '/kpi': 'kpi',
@@ -116,16 +106,11 @@ export default clerkMiddleware(async (auth, request) => {
   const skipOnboardingCheck =
     pathname.startsWith('/api/') ||
     pathname.startsWith('/onboarding') ||
+    pathname.startsWith('/migrate-complete') ||
     pathname.startsWith('/sign-out')
 
-  const metadata = sessionClaims?.metadata as {
-    onboardingComplete?: boolean
-    permissions?: { isAdmin?: boolean }
-    role?: string
-    subscriptionStatus?: string
-  } | undefined
-
   if (!skipOnboardingCheck) {
+    const metadata = sessionClaims?.metadata as { onboardingComplete?: boolean; permissions?: { isAdmin?: boolean } } | undefined
     const isAdmin = metadata?.permissions?.isAdmin === true
     // Admins without onboardingComplete are treated as complete (existing users)
     if (!metadata?.onboardingComplete && !isAdmin) {
@@ -133,19 +118,30 @@ export default clerkMiddleware(async (auth, request) => {
     }
   }
 
-  // Subscription paywall: block access when subscription is not active
-  const isAdmin = metadata?.role === 'admin' || metadata?.role === 'owner' || metadata?.permissions?.isAdmin === true
-  const subscriptionStatus = metadata?.subscriptionStatus
-  const hasActiveSubscription = ACTIVE_SUBSCRIPTION_STATUSES.includes(subscriptionStatus || '')
-  const isSubscriptionExempt = SUBSCRIPTION_EXEMPT_ROUTES.some(route => pathname.startsWith(route))
+  // Subscription paywall: block access when subscription is not active.
+  // Exempt: API routes, settings (so users can manage account), sign-out, the paywall page itself.
+  const ACTIVE_STATUSES = ['active', 'trialing', 'comped']
+  const skipSubscriptionCheck =
+    pathname.startsWith('/api/') ||
+    pathname.startsWith('/settings') ||
+    pathname.startsWith('/sign-out') ||
+    pathname.startsWith('/subscription-required') ||
+    pathname.startsWith('/onboarding') ||
+    pathname.startsWith('/migrate-complete')
 
-  if (!isAdmin && !hasActiveSubscription && !isSubscriptionExempt) {
-    const paywallUrl = new URL('/subscription-required', request.url)
-    // Pass status as query param so the page can show the right message
-    if (subscriptionStatus) {
-      paywallUrl.searchParams.set('status', subscriptionStatus)
+  if (!skipSubscriptionCheck) {
+    const metadata = sessionClaims?.metadata as {
+      subscriptionStatus?: string
+      role?: string
+      permissions?: { isAdmin?: boolean }
+    } | undefined
+    const isAdmin = metadata?.role === 'admin' || metadata?.role === 'owner' || metadata?.permissions?.isAdmin === true
+    const status = metadata?.subscriptionStatus
+    // Only enforce if subscriptionStatus is explicitly set and NOT active.
+    // If metadata has no subscriptionStatus yet (new user, no Clerk template), allow through.
+    if (status && !ACTIVE_STATUSES.includes(status) && !isAdmin) {
+      return NextResponse.redirect(new URL('/subscription-required', request.url))
     }
-    return NextResponse.redirect(paywallUrl)
   }
 
   for (const [route, appId] of Object.entries(appRoutes)) {
