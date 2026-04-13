@@ -258,6 +258,7 @@ function SecuritySection() {
   const [backupCodes, setBackupCodes] = useState<string[] | null>(null)
   const [verifyCode, setVerifyCode] = useState('')
   const [verifyLoading, setVerifyLoading] = useState(false)
+  const [enablePassword, setEnablePassword] = useState('')
   const [disablePassword, setDisablePassword] = useState('')
   const [disableLoading, setDisableLoading] = useState(false)
   const [copiedUri, setCopiedUri] = useState(false)
@@ -299,10 +300,14 @@ function SecuritySection() {
   }
 
   const handleEnableMfa = async () => {
+    if (!enablePassword) {
+      setMfaMsg({ text: 'Enter your current password to enable two-factor authentication.', type: 'error' })
+      return
+    }
     setMfaLoading(true)
     setMfaMsg(null)
     const { data, error } = await authClient.twoFactor.enable({
-      password: currentPassword || undefined,
+      password: enablePassword,
     })
     setMfaLoading(false)
     if (error) {
@@ -310,6 +315,7 @@ function SecuritySection() {
     } else if (data) {
       setTotpUri(data.totpURI)
       if (data.backupCodes) setBackupCodes(data.backupCodes)
+      setEnablePassword('')
     }
   }
 
@@ -470,11 +476,17 @@ function SecuritySection() {
               </div>
             </div>
           ) : (
-            <div className="space-y-2">
+            <div className="space-y-2 max-w-sm">
               <p className="text-sm text-muted-foreground">
                 Add an extra layer of security to your account with time-based one-time passwords.
               </p>
-              <Button onClick={handleEnableMfa} disabled={mfaLoading}>
+              <Input
+                type="password"
+                placeholder="Enter your current password"
+                value={enablePassword}
+                onChange={(e) => setEnablePassword(e.target.value)}
+              />
+              <Button onClick={handleEnableMfa} disabled={mfaLoading || !enablePassword}>
                 {mfaLoading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
                 Enable Two-Factor Authentication
               </Button>

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { requireAdmin, AuthError } from '@/lib/auth-helpers'
 import { safeErrorResponse } from '@/lib/security'
+import { sendEmail } from '@/lib/email'
 import { db, eq, and, desc } from '@0ne/db/server'
 import { invites } from '@0ne/db/server'
 
@@ -64,6 +65,22 @@ export async function POST(request: NextRequest) {
         source: source || 'manual',
       })
       .returning()
+
+    const origin = request.nextUrl.origin
+    const signUpUrl = `${origin}/sign-up?invite=${data.inviteToken}`
+    const greeting = data.name ? `Hi ${data.name},` : 'Hi,'
+
+    try {
+      await sendEmail({
+        to: data.email,
+        subject: "You're invited to 0ne",
+        text: `${greeting}\n\nYou've been invited to join 0ne. Click the link below to create your account:\n\n${signUpUrl}\n\nIf you weren't expecting this invite, you can ignore this email.`,
+        html: `<p>${greeting}</p><p>You've been invited to join 0ne. Click the link below to create your account:</p><p><a href="${signUpUrl}">${signUpUrl}</a></p><p>If you weren't expecting this invite, you can ignore this email.</p>`,
+      })
+    } catch (emailError) {
+      console.error('[invites] Failed to send invite email:', emailError)
+      return NextResponse.json({ invite: data, warning: 'Invite created but email failed to send' })
+    }
 
     return NextResponse.json({ invite: data })
   } catch (error) {
